@@ -204,6 +204,25 @@ def _counter_delta(current, baseline_value):
     return round(current - baseline_value, 3)
 
 
+def _overlaps(charge, start_ts, end_ts):
+    """True if a completed charge session's window intersects [start_ts, end_ts].
+
+    ``charge`` is a trip_stats manager's ``last_charge`` dict (or None) — the
+    same record ``compute_charge_session`` produces, carrying ``start_ts``/
+    ``end_ts`` as ISO-8601 strings, which sort correctly as plain strings.
+    Returns False on anything malformed rather than raising, since this is
+    only ever used to decide whether to trust a heuristic, never something
+    load-bearing enough to justify an exception mid-trip-close.
+    """
+    if not charge:
+        return False
+    charge_start = charge.get("start_ts")
+    charge_end = charge.get("end_ts")
+    if not charge_start or not charge_end:
+        return False
+    return charge_start <= end_ts and charge_end >= start_ts
+
+
 def _efficiency_block(distance_km, distance_mi, energy_kwh):
     """The 5-key energy/efficiency block for one (distance, energy) pairing.
     Shared by the primary, _counter, and _soc figures so all three stay
@@ -242,6 +261,7 @@ def compute_completed_trip(
     is_electric: bool,
     is_combustion: bool,
     retrospective: bool = False,
+    last_charge: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Compute a completed-trip dict for the drive ending at ``end``.
 
@@ -307,7 +327,21 @@ def compute_completed_trip(
     charged_during_park = False
     if is_electric and start.soc_pct is not None and end.soc_pct is not None:
         soc_delta = round(start.soc_pct - end.soc_pct, 1)
-        if soc_delta < 0:
+        # A rise here is not on its own evidence of an external charge — a
+        # PHEV/HEV's engine or regen can legitimately raise SOC net across a
+        # trip with nothing plugged in at all (#354's mistake, one code path
+        # over: any SOC rise treated as proof of an outside event). The
+        # positive check available here is the manager's own charge-session
+        # tracking: if a completed charge's window actually overlaps this
+        # trip, that is real evidence, not an inference from SOC alone.
+        #
+        # Without that evidence, a negative soc_used_pct is left as a
+        # genuine net gain rather than hidden — _efficiency_block already
+        # returns all-None below when energy is zero or negative, so the
+        # (meaningless) efficiency figures blank themselves out on their
+        # own; the raw SOC/energy delta stays visible rather than the whole
+        # block vanishing along with a misleading "charged" flag.
+        if soc_delta < 0 and _overlaps(last_charge, start.ts, end.ts):
             charged_during_park = True
         else:
             soc_used_pct = soc_delta
@@ -408,8 +442,17 @@ def compute_completed_trip(
     # ── Fuel (ICE/HEV/PHEV) ──────────────────────────────────────────────────
     if is_combustion and start.fuel_pct is not None and end.fuel_pct is not None:
         fuel_used = round(start.fuel_pct - end.fuel_pct, 1)
+        # No refuel-session tracking exists to check against (unlike the SOC
+        # case above, which has real charge-session data available) — a
+        # rise here is left as a negative fuel_used_pct (a small net gain,
+        # most plausibly gauge noise) rather than guessed at. A genuine
+        # refuel mid-trip is rare enough, and a wrong guess costly enough
+        # (silently discarding real consumption figures), that showing the
+        # raw number honestly beats flagging an event we have no way to
+        # actually confirm.
         if fuel_used < 0:
             trip["refuelled_during_park"] = True
+            trip["fuel_used_pct"] = fuel_used
         else:
             trip["fuel_used_pct"] = fuel_used
             if tank_litres:
@@ -779,20 +822,31 @@ class TripStatsManager:
             "soc_low_pct", self.soc_reset_baseline.get("soc_pct", soc_pct)
         )
         if soc_pct >= low + SOC_CHARGE_RISE_PCT:
-            # A rise, but from what? If the odometer moved since the last
-            # parked reading, the car drove here and the gain is regen, so the
-            # baseline must stand or the leg just driven is erased from the
-            # figures (#354). If it did not move, the energy came from
-            # outside the car: a charge, including one that finished while
-            # Home Assistant was down or while the charging endpoint was
-            # silent, neither of which we would otherwise see.
-            if previous is not None and (
-                abs(odometer_km - previous["odometer_km"]) >= REGEN_ODOMETER_MOVED_KM
+            # A rise above the low-water mark, but from what? Two conditions
+            # must BOTH hold for this to be a charge: the car hasn't moved
+            # since the last parked reading (charging happens standing
+            # still), AND SOC is higher than that SAME reading — not merely
+            # above the low-water mark in general.
+            #
+            # The second condition is not optional. Without it, a LATER poll
+            # sitting at an already-explained regen value looks identical to
+            # a fresh charge signal: hasn't moved, still above the low. That
+            # is exactly what broke the first version of this fix in the
+            # field (#354, confirmed on 1.2.9-beta1 by @SteveMSJ): arrive at
+            # a spot via regen, correctly hold; a SECOND poll at the same
+            # spot, unmoved, sees "hasn't moved AND above the low" all over
+            # again and rebases onto its own earlier "this was regen"
+            # conclusion, discarding the outbound leg exactly as before.
+            # Comparing against the immediate previous reading rather than
+            # the low-water mark closes that gap: sitting still at an
+            # unchanged SOC is "nothing new happened", not fresh evidence.
+            if (
+                previous is not None
+                and abs(odometer_km - previous["odometer_km"]) < REGEN_ODOMETER_MOVED_KM
+                and soc_pct > previous["soc_pct"]
             ):
-                return True  # regen while driving — reading tracked, baseline held
-
-            self.soc_reset_baseline = self._new_soc_baseline(soc_pct, odometer_km, ts)
-            return True
+                self.soc_reset_baseline = self._new_soc_baseline(soc_pct, odometer_km, ts)
+            return True  # held (regen, or nothing new) — or rebased, above
 
         # Still discharging: track the new low so the next charge is measured
         # from the bottom of this cycle.
@@ -897,6 +951,7 @@ class TripStatsManager:
             tank_litres=tank_litres,
             is_electric=is_electric,
             is_combustion=is_combustion,
+            last_charge=self.last_charge,
         )
         return self._finalise(trip, snapshot)
 
@@ -956,6 +1011,7 @@ class TripStatsManager:
             tank_litres=tank_litres,
             is_electric=is_electric,
             is_combustion=is_combustion,
+            last_charge=self.last_charge,
             retrospective=True,
         )
         return self._finalise(trip, snapshot)
@@ -994,6 +1050,7 @@ class TripStatsManager:
             tank_litres=tank_litres,
             is_electric=is_electric,
             is_combustion=is_combustion,
+            last_charge=self.last_charge,
             retrospective=True,
         )
         return self._finalise(trip, end)

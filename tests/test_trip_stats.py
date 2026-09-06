@@ -54,17 +54,54 @@ class TestBevTrip(unittest.TestCase):
         self.assertIsNone(trip["fuel_used_litres"])
 
     def test_charged_between_flags_and_skips_energy(self):
-        # SOC went UP (charged while parked before this drive's end reading).
+        # SOC went UP, AND a completed charge's window genuinely overlaps
+        # this trip -- real evidence, not an inference from SOC alone (#354:
+        # a PHEV/HEV's engine or regen can raise SOC net across a trip with
+        # nothing plugged in, so a rise on its own is no longer trusted).
+        start = snap(1000.0, soc=50.0, t="2026-08-21T09:00:00+00:00")
+        end = snap(1010.0, soc=60.0, t="2026-08-21T09:30:00+00:00")
+        last_charge = {
+            "start_ts": "2026-08-21T09:05:00+00:00",
+            "end_ts": "2026-08-21T09:20:00+00:00",
+        }
+        trip = ts.compute_completed_trip(
+            start, end, capacity_kwh=64.0, tank_litres=None,
+            is_electric=True, is_combustion=False, last_charge=last_charge,
+        )
+        self.assertEqual(trip["distance_km"], 10.0)  # distance still valid
+        self.assertTrue(trip["charged_during_park"])
+        self.assertIsNone(trip["energy_kWh"])
+        self.assertIsNone(trip["efficiency_km_per_kWh"])
+
+    def test_soc_rise_with_no_charge_evidence_is_shown_as_a_net_gain(self):
+        """The counterpart (#354): same SOC rise, but nothing confirms a
+        charge happened. Treated as a genuine net gain -- likely regen or
+        engine-charging on a PHEV/HEV -- not silently flagged and hidden."""
         start = snap(1000.0, soc=50.0)
         end = snap(1010.0, soc=60.0)
         trip = ts.compute_completed_trip(
             start, end, capacity_kwh=64.0, tank_litres=None,
             is_electric=True, is_combustion=False,
         )
-        self.assertEqual(trip["distance_km"], 10.0)  # distance still valid
-        self.assertTrue(trip["charged_during_park"])
-        self.assertIsNone(trip["energy_kWh"])
+        self.assertFalse(trip["charged_during_park"])
+        self.assertEqual(trip["soc_used_pct"], -10.0)
+        # _efficiency_block already blanks itself on non-positive energy --
+        # no separate clamping needed for this to come out sane.
         self.assertIsNone(trip["efficiency_km_per_kWh"])
+
+    def test_charge_evidence_outside_the_trip_window_does_not_count(self):
+        start = snap(1000.0, soc=50.0, t="2026-08-21T09:00:00+00:00")
+        end = snap(1010.0, soc=60.0, t="2026-08-21T09:30:00+00:00")
+        last_charge = {  # a real charge, but hours before this trip
+            "start_ts": "2026-08-21T02:00:00+00:00",
+            "end_ts": "2026-08-21T04:00:00+00:00",
+        }
+        trip = ts.compute_completed_trip(
+            start, end, capacity_kwh=64.0, tank_litres=None,
+            is_electric=True, is_combustion=False, last_charge=last_charge,
+        )
+        self.assertFalse(trip["charged_during_park"])
+        self.assertEqual(trip["soc_used_pct"], -10.0)
 
     def test_missing_capacity_gives_distance_and_soc_only(self):
         start = snap(1000.0, soc=80.0)
@@ -117,6 +154,38 @@ class TestPhevTrip(unittest.TestCase):
         self.assertEqual(trip["distance_km"], 50.0)
         self.assertAlmostEqual(trip["energy_kWh"], 2.0, places=3)  # 10% of 20
         self.assertAlmostEqual(trip["fuel_used_litres"], 1.6, places=2)  # 4% of 40
+
+    def test_engine_charging_raises_soc_with_no_plug_involved(self):
+        """@HarryFlatter's report (#354): a PHEV/HEV's engine or regen can
+        raise SOC net across a trip with nothing plugged in at all. Shown as
+        a net gain, not silently hidden behind a misleading charged flag —
+        the fuel side, driven independently, is unaffected."""
+        start = snap(2000.0, soc=70.0, fuel=80.0)
+        end = snap(2050.0, soc=71.4, fuel=76.0)
+        trip = ts.compute_completed_trip(
+            start, end, capacity_kwh=20.0, tank_litres=40.0,
+            is_electric=True, is_combustion=True,
+        )
+        self.assertFalse(trip["charged_during_park"])
+        self.assertAlmostEqual(trip["soc_used_pct"], -1.4, places=3)
+        self.assertIsNone(trip["efficiency_km_per_kWh"])
+        self.assertAlmostEqual(trip["fuel_used_litres"], 1.6, places=2)
+
+    def test_fuel_level_rise_is_shown_not_hidden(self):
+        """No refuel-session tracking exists to check against, unlike the
+        SOC case above -- shown as the raw (negative) delta rather than
+        guessed at, with the flag kept as a heads-up rather than a reason to
+        blank the trip."""
+        start = snap(2000.0, soc=70.0, fuel=40.0)
+        end = snap(2050.0, soc=60.0, fuel=41.0)
+        trip = ts.compute_completed_trip(
+            start, end, capacity_kwh=20.0, tank_litres=40.0,
+            is_electric=True, is_combustion=True,
+        )
+        self.assertTrue(trip["refuelled_during_park"])
+        self.assertAlmostEqual(trip["fuel_used_pct"], -1.0, places=3)
+        self.assertIsNone(trip["fuel_used_litres"])
+        self.assertAlmostEqual(trip["energy_kWh"], 2.0, places=3)  # SOC side unaffected
 
 
 class TestInvalidTrips(unittest.TestCase):
@@ -496,6 +565,45 @@ class TestNoteSocResetBaseline(unittest.TestCase):
         )
         self.assertAlmostEqual(m.soc_reset_baseline["soc_pct"] - 78.4, 1.6, places=1)
 
+    def test_a_second_poll_at_the_same_regen_spot_does_not_rebase(self):
+        """The exact way the first version of this fix broke in the field
+        (#354): @SteveMSJ updated to 1.2.9-beta1, repeated the same downhill
+        walk, and the baseline STILL rebased to the regen-elevated reading —
+        because a second poll landed while he was still parked at the wood,
+        unchanged from the first, and "hasn't moved, still above the low"
+        was satisfied a second time using the fix's own earlier "this was
+        regen" conclusion as if it were new evidence.
+        """
+        m = self._mgr()
+        m.note_soc_reset_baseline(80.0, 16941.69, "t1")       # home, post-charge
+        m.note_soc_reset_baseline(80.6, 16946.66, "t2")       # wood, regen, held
+        self.assertEqual(m.soc_reset_baseline["odometer_km"], 16941.69)
+
+        # Still parked at the wood — a second poll, unchanged.
+        m.note_soc_reset_baseline(80.6, 16946.66, "t3")
+        self.assertEqual(
+            m.soc_reset_baseline["odometer_km"],
+            16941.69,
+            "a second unchanged reading at the same spot must not rebase",
+        )
+        self.assertEqual(m.soc_reset_baseline["soc_pct"], 80.0)
+
+        m.note_soc_reset_baseline(79.2, 16946.66 + 4.97, "t4")  # home again
+        self.assertEqual(m.soc_reset_baseline["soc_pct"], 80.0)
+        self.assertEqual(m.soc_reset_baseline["odometer_km"], 16941.69)
+
+    def test_soc_climbing_further_while_still_at_the_same_spot_does_rebase(self):
+        """The counterpart the fix must not lose: charging in place, across
+        several polls, with SOC genuinely climbing each time — not just
+        holding at the same value — must still be recognised as a charge."""
+        m = self._mgr()
+        m.note_soc_reset_baseline(60.0, 2000.0, "t1")
+        m.note_soc_reset_baseline(60.8, 2010.0, "t2")   # arrived, regen, held
+        for soc in (65.0, 70.0, 75.0):
+            m.note_soc_reset_baseline(soc, 2010.0, "t")
+        self.assertEqual(m.soc_reset_baseline["soc_pct"], 75.0)
+        self.assertEqual(m.soc_reset_baseline["odometer_km"], 2010.0)
+
     def test_charge_while_stationary_still_rebases(self):
         """The counterpart: same SOC rise, but the car hasn't moved, so the
         energy came from outside — including a charge finished while Home
@@ -634,13 +742,30 @@ class TestRetrospectiveTrip(unittest.TestCase):
         m.detect_missed_trip(
             Snap(ts="2026-08-21T06:00:00+00:00", odometer_km=2000.0, soc_pct=40.0),
             **self._kw)
-        # SOC rose (a charge happened somewhere in the gap) -> no electric figure.
+        # A completed charge recorded during the gap overlaps it -> flagged.
+        m.last_charge = {
+            "start_ts": "2026-08-21T07:00:00+00:00",
+            "end_ts": "2026-08-21T09:00:00+00:00",
+        }
         trip = m.detect_missed_trip(
             Snap(ts="2026-08-21T10:00:00+00:00", odometer_km=2015.0, soc_pct=90.0),
             **self._kw)
         self.assertEqual(trip["distance_km"], 15.0)
         self.assertTrue(trip["charged_during_park"])
         self.assertIsNone(trip["efficiency_km_per_kWh"])
+
+    def test_soc_rise_in_gap_with_no_charge_record_is_a_net_gain(self):
+        """No completed charge was recorded overlapping the gap -- reported
+        as the raw (negative) delta rather than assumed to be a charge."""
+        m = self._mgr()
+        m.detect_missed_trip(
+            Snap(ts="2026-08-21T06:00:00+00:00", odometer_km=2000.0, soc_pct=40.0),
+            **self._kw)
+        trip = m.detect_missed_trip(
+            Snap(ts="2026-08-21T10:00:00+00:00", odometer_km=2015.0, soc_pct=90.0),
+            **self._kw)
+        self.assertFalse(trip["charged_during_park"])
+        self.assertEqual(trip["soc_used_pct"], -50.0)
 
 
 class TestForceCloseStale(unittest.TestCase):
