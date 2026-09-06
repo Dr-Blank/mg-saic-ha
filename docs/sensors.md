@@ -118,7 +118,7 @@ Notes and limitations:
 - SOC and fuel level are whole-number percentages, so figures for very short trips are coarse.
 - Trip *duration* is measured to the poll that detects shutdown, so treat it as approximate.
 - Fuel figures in litres / L per 100 km need a per-model tank size; until one is set for a given model, the fuel sensor reports **fuel % used** but not litres, L/100km or mpg.
-- If the car is charged or refuelled while parked mid-trip, that trip's electric/fuel figure is omitted and flagged (`charged_during_park` / `refuelled_during_park`) rather than reported wrongly.
+- A rise in SOC or fuel level across a trip isn't automatically treated as a charge or refuel — a PHEV/HEV's engine or regen can genuinely raise SOC net across a drive with nothing plugged in at all, and that's shown as the trip's actual figure rather than hidden. `charged_during_park` is only set when a completed charge recorded by the integration actually overlaps the trip's time window — real evidence, not an inference from SOC alone. There's no equivalent tracking for refuelling, so `refuelled_during_park` stays a heads-up alongside the honest (negative) fuel figure rather than something that blanks the trip.
 - When a value can't be computed yet, the efficiency sensors read **Unknown** rather than Unavailable — e.g. `Efficiency Since Last Charge` while charging or right after a charge (0 km driven since), or `Last Trip Efficiency` for a trip where a charge spanned the drive. The sensor's attributes still show the breakdown so you can see why.
 
 ### BINARY SENSORS
