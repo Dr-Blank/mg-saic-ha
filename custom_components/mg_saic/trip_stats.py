@@ -456,6 +456,11 @@ def compute_completed_trip(
         else:
             trip["fuel_used_pct"] = fuel_used
             if tank_litres:
+                # Surfaced so an owner can see which tank size produced these
+                # figures without digging through options — tank sizes are
+                # market-split for the same model, so "is it using mine?" is a
+                # reasonable question to be able to answer (#354).
+                trip["fuel_tank_litres"] = tank_litres
                 litres = round(fuel_used / 100.0 * tank_litres, 2)
                 trip["fuel_used_litres"] = litres
                 if litres > 0:

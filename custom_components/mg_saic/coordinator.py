@@ -13,6 +13,7 @@ from .backends import Feature
 from .backends import backend_supports as _backend_supports
 from .logic import (
     TARGET_SOC_PERCENT_BY_CODE,
+    resolve_fuel_tank_litres,
     apply_energy_correction,
     electric_range_km,
     project_range_at_target,
@@ -43,6 +44,7 @@ from .const import (
     CONF_HOLIDAY_UPDATE_INTERVAL,
     CONF_STALE_DATA_THRESHOLD,
     CONF_BATTERY_CAPACITY_OVERRIDE,
+    CONF_FUEL_TANK_OVERRIDE,
     parse_capacity_override,
     DEFAULT_HOLIDAY_UPDATE_INTERVAL_HOURS,
     DEFAULT_STALE_DATA_THRESHOLD_HOURS,
@@ -218,6 +220,7 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         # full integration reload — see async_update_options.
         self._profile_battery_capacity_kwh = None
         self.known_fuel_tank_litres = None  # Per-model tank size, for fuel stats (#301)
+        self.fuel_tank_override = None  # User override; set from options below
         # Trip/efficiency stats manager (#301). Created and loaded in async_setup.
         self.trip_stats = None
         # Climate control profile — set from VEHICLE_PROFILES on first data fetch.
@@ -406,6 +409,12 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         # known_battery_capacity_kwh is resolved once the series is known.
         self.battery_capacity_override = parse_capacity_override(
             config_entry.options.get(CONF_BATTERY_CAPACITY_OVERRIDE, None)
+        )
+        # User-supplied petrol tank size (litres). Same precedence idea as the
+        # capacity override, minus the API tier — SAIC reports no tank size at
+        # all, so this overrides our per-model figure and nothing else.
+        self.fuel_tank_override = parse_capacity_override(
+            config_entry.options.get(CONF_FUEL_TANK_OVERRIDE, None)
         )
         self.has_heated_seats = config_entry.options.get(
             "has_heated_seats", config_entry.data.get("has_heated_seats", False)
@@ -716,6 +725,9 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         # plain options save) — the sensor kept showing the stale/API value.
         self.battery_capacity_override = parse_capacity_override(
             options.get(CONF_BATTERY_CAPACITY_OVERRIDE, None)
+        )
+        self.fuel_tank_override = parse_capacity_override(
+            options.get(CONF_FUEL_TANK_OVERRIDE, None)
         )
         self.known_battery_capacity_kwh = (
             self.battery_capacity_override
@@ -1442,7 +1454,7 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         snap = self._trip_snapshot(basic_status, charging_data)
         trip_kwargs = dict(
             capacity_kwh=self.effective_battery_capacity_kwh,
-            tank_litres=self.known_fuel_tank_litres,
+            tank_litres=self.effective_fuel_tank_litres,
             is_electric=self.vehicle_type in ("BEV", "PHEV"),
             is_combustion=self.vehicle_type in ("ICE", "HEV", "PHEV"),
         )
@@ -1513,6 +1525,22 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
             self._api_battery_capacity_raw(),
             factor=DATA_DECIMAL_CORRECTION,
         )
+
+    @property
+    def fuel_tank_resolution(self):
+        """(litres, source) using override > our per-model figure, or (None, None).
+
+        No API tier: SAIC reports no tank size, so unlike battery capacity
+        there is nothing to fall back to beyond our own table (#354).
+        """
+        return resolve_fuel_tank_litres(
+            self.fuel_tank_override, self.known_fuel_tank_litres
+        )
+
+    @property
+    def effective_fuel_tank_litres(self):
+        """Petrol tank size in litres from either tier, or None."""
+        return self.fuel_tank_resolution[0]
 
     @property
     def effective_battery_capacity_kwh(self):

@@ -251,9 +251,31 @@ class ElectricRangeKmTests(unittest.TestCase):
         charging = SimpleNamespace(rvsChargeStatus=SimpleNamespace(fuelRangeElec=-128))
         self.assertEqual(self._range(basic, charging), 53.0)
 
-    def test_zero_range_is_a_real_value(self):
-        # A flat pack genuinely has no range left; that is not missing data.
-        self.assertEqual(self._range(SimpleNamespace(fuelRangeElec=0)), 0.0)
+    def test_zero_fuel_range_elec_falls_through_to_imcu(self):
+        """0 means "not reported", not "no range left" (#354).
+
+        @HarryFlatter's charge log: rvsChargeStatus.fuelRangeElec sat at 0
+        for an entire charge while imcuVehElecRng climbed 75 -> 120 km.
+        Accepting that 0 short-circuits the fallback and hands every caller a
+        range of zero, which broke the range-after-charging projection and
+        made Last Charge Range Added read 0.0 against a ~28 mile charge.
+        """
+        charging = SimpleNamespace(
+            rvsChargeStatus=SimpleNamespace(fuelRangeElec=0),
+            chrgMgmtData=SimpleNamespace(imcuVehElecRng=75),
+        )
+        self.assertEqual(
+            self._range(SimpleNamespace(fuelRangeElec=-128), charging), 75.0
+        )
+
+    def test_zero_everywhere_is_unknown_not_zero(self):
+        """With no usable source at all, None is more honest than a 0 that
+        silently breaks every calculation downstream."""
+        charging = SimpleNamespace(
+            rvsChargeStatus=SimpleNamespace(fuelRangeElec=0),
+            chrgMgmtData=SimpleNamespace(imcuVehElecRng=0),
+        )
+        self.assertIsNone(self._range(SimpleNamespace(fuelRangeElec=0), charging))
 
     def test_falls_back_to_imcu_vehicle_range(self):
         """Models flagged reliable_fuel_range_elec: False never give a usable
@@ -448,6 +470,44 @@ class AddedElectricRangeScaleTests(unittest.TestCase):
             "Added Electric Range must not use the tenths correction — the car "
             "reports whole kilometres (#326)",
         )
+
+
+class ResolveFuelTankLitresTests(unittest.TestCase):
+    """Tank size precedence: user override > our per-model figure (#354).
+
+    Unlike battery capacity there is no third API tier — SAIC reports no
+    tank size at all — so a user override is the only way to correct a model
+    whose tank size is market-split.
+    """
+
+    def test_override_wins(self):
+        self.assertEqual(
+            LOGIC.resolve_fuel_tank_litres(55.0, 37.0), (55.0, "user_override")
+        )
+
+    def test_profile_used_when_no_override(self):
+        self.assertEqual(
+            LOGIC.resolve_fuel_tank_litres(None, 37.0), (37.0, "profile")
+        )
+
+    def test_nothing_available(self):
+        self.assertEqual(LOGIC.resolve_fuel_tank_litres(None, None), (None, None))
+
+    def test_override_works_with_no_profile_figure(self):
+        # An unprofiled ICE model: the override is the only source there is.
+        self.assertEqual(
+            LOGIC.resolve_fuel_tank_litres(50.0, None), (50.0, "user_override")
+        )
+
+    def test_harrys_numbers(self):
+        """@HarryFlatter's HS PHEV: 19% used reported as 7.03 L against our
+        37 L figure. With his 55 L override the same 19% is 10.45 L, which
+        over his 209 km trip is ~5.0 L/100km (≈56 mpg) rather than
+        ≈84 mpg — the more plausible figure for a trip that used almost no
+        battery."""
+        litres, source = LOGIC.resolve_fuel_tank_litres(55.0, 37.0)
+        self.assertEqual(source, "user_override")
+        self.assertAlmostEqual(19.0 / 100.0 * litres, 10.45, places=2)
 
 
 if __name__ == "__main__":
