@@ -327,3 +327,5 @@ The **Fuel tank size override (litres)** option (under **Configure**) lets you s
 The trip sensors carry a `fuel_tank_litres` attribute showing which tank size actually produced the figures, so you can confirm your override is in use without digging through options.
 
 If your fuel figures look implausible — an unrealistically good mpg is the usual sign, since too small a tank understates the litres used — this is the setting to check. There are only two tiers here (override, then our figure), so if neither has a value the fuel sensors report **% used** but not litres, L/100km or mpg.
+
+Both override fields are shown to every vehicle, since the options form isn't filtered by vehicle type. **If you drive a BEV you can safely ignore the fuel tank field** — setting it has no effect, because nothing on a battery-electric car computes fuel figures. The same applies in reverse: the battery capacity field is shown to ICE owners and is equally inert there.
