@@ -3277,6 +3277,7 @@ _TRIP_ATTR_KEYS = (
     "consumption_kWh_per_100km_soc",
     "consumption_kWh_per_100mi_soc",
     "fuel_used_pct",
+    "fuel_tank_litres",
     "fuel_used_litres",
     "fuel_consumption_L_per_100km",
     "fuel_economy_mpg_uk",

@@ -936,6 +936,7 @@ CONF_STALE_DATA_THRESHOLD = "stale_data_threshold_hours"
 # User-supplied usable battery capacity (kWh). Overrides both our per-model
 # profile value and the API-reported totalBatteryCapacity. Empty/0 = no override.
 CONF_BATTERY_CAPACITY_OVERRIDE = "battery_capacity_override_kwh"
+CONF_FUEL_TANK_OVERRIDE = "fuel_tank_override_litres"
 
 
 def parse_capacity_override(raw):
