@@ -1194,6 +1194,40 @@ class TestNoVehiclesSetupMessage(unittest.TestCase):
                 msg=f"{lang}.json is missing config.error.no_vehicles",
             )
 
+    def test_every_language_file_has_the_same_keys(self):
+        """Generalises the check above to the whole file (#354).
+
+        The fuel tank override shipped English-only on its first pass and
+        only got caught by review — a user on another language would have
+        seen a raw key like `fuel_tank_override_litres` as the field label.
+        This makes that a test failure rather than something to spot by eye
+        next time an option is added.
+        """
+        import json
+
+        def keys(obj, prefix=""):
+            found = set()
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    found.add(prefix + k)
+                    found |= keys(v, prefix + k + ".")
+            return found
+
+        base = Path(CF.__file__).resolve().parent / "translations"
+        english = keys(json.load(open(base / "en.json", encoding="utf-8")))
+        for lang in ("es", "fr", "pt"):
+            other = keys(json.load(open(base / f"{lang}.json", encoding="utf-8")))
+            self.assertEqual(
+                english - other,
+                set(),
+                msg=f"{lang}.json is missing keys present in en.json",
+            )
+            self.assertEqual(
+                other - english,
+                set(),
+                msg=f"{lang}.json has keys that en.json doesn't",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
