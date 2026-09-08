@@ -292,7 +292,7 @@ The integration includes built-in profiles for specific MG/SAIC models that corr
 | Series | Model | Notes |
 |---|---|---|
 | `EH32` | MG4 Electric | Temperature range and fan speed values confirmed; PTC resistive **Heat** mode supported (#173) |
-| `AH4EM` | MG4 EV URBAN | Mode-select climate scheme (owner-confirmed, #243); this variant has no heat mode — see [Climate Control](controls.md#climate-control) |
+| `AH4EM` | MG4 EV URBAN | Mode-select climate scheme; `Cool` and `Heat` share one mode, decided by the temperature you set (owner-confirmed, #243, #336) — see [Climate Control](controls.md#climate-control) |
 | `MIS3E` | MGS6 EV (Long Range / Dual Motor) | Battery capacity 74.3 kWh; inverted temperature index; model year override (API reports 2024, corrected to 2025) |
 | `MZS3E` | MGS5 EV | Mode-select climate scheme mirroring the MGS6 (status code 2 = cool, #277); battery capacity 62.1 kWh usable (64 kWh gross pack EU169A64S, #301); temperature index inherited from the MGS6 as best-effort |
 | `EC32` | MG Cyberster | 2-door BEV roadster; no rear doors/windows; unreliable live electric range field (falls back to estimated range) |

@@ -310,30 +310,40 @@ VEHICLE_PROFILES = {
         # MG4 (EH32). It uses mode_select: the API's "fan_speed" byte is a MODE
         # selector that the car echoes back verbatim as remoteClimateStatus.
         # Confirmed with the AC command on (value sent == remoteClimateStatus):
-        #   1 -> fan only  (HVAC runs but does not cool)
-        #   3 -> cooling   (confirmed: cabin cooled, climate tile stayed on)
+        #   1 -> fan only    (HVAC runs but does not condition the air)
+        #   2 -> auto/normal (follows the requested temperature -- see below)
+        #   3 -> max cool    (cools regardless of requested temperature)
         #   5 -> front defrost
-        # Mode 3 is therefore used as the (only confirmed) cool mode.
         #
-        # Mode 2's meaning on THIS car is NOT confirmed. It was only seen via the
-        # fan-only path and reported as "on but not fan-only", which is
-        # ambiguous — and on the sister MG4 (EH32) mode 2 is HEAT, not cool (see
-        # PR #173, confirmed from decrypted traffic). So we deliberately do NOT
-        # send 2 for cooling: doing so risks heating the cabin when the user
-        # asked for cool. If mode 2 is later confirmed (auto-cool vs PTC heat),
-        # add it here — and if it turns out to be heat, this car may gain a Heat
-        # mode it can't get from the limited iSmart app.
+        # Mode 2 confirmed by MarcThu (#336), two runs a day apart, same mode
+        # both times: temperature set LOW -> genuinely cold air, higher fan;
+        # temperature set HIGH -> genuinely warm air, slower fan, more toward
+        # the windscreen. So unlike the sister MG4 (EH32), where mode 2 is a
+        # FIXED heat mode (PR #173, decrypted traffic) and mode 3 is a fixed
+        # cool mode -- two distinct, non-overlapping modes -- on THIS car mode
+        # 2 is a single general-purpose mode that follows temperature in
+        # either direction, and mode 3 is a separate, stronger cool-only mode.
+        # The two MG4 variants are NOT interchangeable; do not carry a change
+        # from one profile to the other without equivalent confirmation.
         #
-        # No heat mode is exposed yet (the app has none and mode 2/4 are
-        # unconfirmed); climate_status_heat is left unset, which suppresses the
-        # Heat HVAC mode (see climate.py). The iSmart app also has no
-        # front-defrost button, so exposing the Defrost preset (mode 5, confirmed
-        # working) gives the owner a control the app lacks.
+        # This resolved the original complaint in #336: HA's plain Cool always
+        # sent mode 3, which ignores the requested temperature and always
+        # cools -- so asking for 28°C still produced cold air. Cool and Heat
+        # now both use mode 2, differing only in the temperature sent
+        # alongside it, matching what the app's own slider does.
         #
-        # Temperature range/offset follow the MG4 (EH32); the car still honours a
-        # target temperature under the cool mode. Not independently re-verified
-        # for this variant — revisit if an owner reports the target temperature
-        # landing wrong.
+        # cool_uses_start_ac=True because mode 2 makes remoteClimateStatus
+        # ambiguous between Cool and Heat -- the status code alone can't say
+        # which is running, only what we last asked for can (climate.py
+        # trusts the locally-tracked mode; climate_mode_from_status on the
+        # coordinator does the same via requested_hvac_mode, for the separate
+        # Climate Mode sensor). Modes 1/3/5 are unambiguous and still resolve
+        # normally.
+        #
+        # Temperature range/offset follow the MG4 (EH32); the car honours a
+        # target temperature under mode 2, confirmed by the cold/warm split
+        # above. Not independently re-verified beyond that split -- revisit if
+        # an owner reports the target temperature landing wrong.
         "min_temp": 17,
         "max_temp": 33,
         "temp_offset": 3,
@@ -344,21 +354,21 @@ VEHICLE_PROFILES = {
         # --- mode_select climate scheme ---
         "climate_control_scheme": "mode_select",
         "climate_mode_fan_only": 1,
-        "climate_mode_cool": 3,       # only confirmed cool value on this car
+        "climate_mode_cool": 2,        # auto/normal -- follows requested temp
+        "climate_mode_heat": 2,        # same mode; direction set by temp alone
+        "climate_mode_max_cool": 3,    # confirmed cool-only, ignores temp
         "climate_mode_defrost": 5,
-        # No distinct climate_mode_max_cool: mode 3 is the only confirmed cool,
-        # so plain Cool already uses the strongest cooling this car has. The
-        # Max Cool preset is still offered via max_cool_forces_min_temp below —
-        # it sends that same cool mode but pins the target temperature to the
-        # profile minimum (17°C), mirroring the iSmart app's one-tap LOW-cool
-        # button (temperature to lowest + fan max in a single action; #243).
-        # No climate_mode_heat — unconfirmed, and this car has no heater, so a
-        # matching Max Heat is deliberately not offered here.
+        "cool_uses_start_ac": True,    # mode 2 is ambiguous -- see notes above
+        # Max Cool also pins the setpoint to the profile minimum, on top of
+        # using the genuinely stronger mode 3 -- belt and braces, and matches
+        # the iSmart app's one-tap LOW-cool button (#243).
         "max_cool_forces_min_temp": True,
         "climate_status_fan_only": {1},
-        "climate_status_cool": {3},
+        "climate_status_cool": {3},    # only the UNAMBIGUOUS cool-only mode
+        "climate_status_heat": {2},    # gates whether Heat is offered at all;
+        # the actual mode-2 resolution goes through requested_hvac_mode, not
+        # this set -- see climate_mode_from_status.
         "climate_status_defrost": {5},
-        # No climate_status_heat — leaving it unset suppresses the Heat mode.
     },
     "MIS3E": {  # MGS6 EV (Long Range and Dual Motor)
         "min_temp": 16,

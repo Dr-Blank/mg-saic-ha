@@ -379,6 +379,15 @@ class SAICMGClimateEntity(CoordinatorEntity, ClimateEntity):
         )
         self._last_command_ts = time.monotonic()
         self._attr_hvac_mode = hvac_mode
+        # Mirrored onto the coordinator (not just this entity) so the
+        # separate Climate Mode sensor can resolve the same ambiguity this
+        # entity already handles via cool_uses_start_ac -- see
+        # climate_mode_from_status, which needs this for mode_select cars
+        # where one status code covers both Cool and Heat (#336).
+        if hvac_mode in (HVACMode.COOL, HVACMode.HEAT):
+            self.coordinator.requested_hvac_mode = (
+                "cool" if hvac_mode == HVACMode.COOL else "heat"
+            )
         if self._scheme == "mode_select":
             self._attr_preset_mode = preset
         self.async_write_ha_state()

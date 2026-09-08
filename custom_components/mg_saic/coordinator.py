@@ -256,6 +256,11 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         # command dispatch lives in exactly one place. Both are set up before any
         # command can be issued by a user.
         self.requested_target_temp: float = 22.0
+        # Last Cool/Heat mode actually sent, as "cool"/"heat"/"off". Mirrors
+        # the climate entity's own local tracking, but at coordinator level so
+        # the separate Climate Mode sensor can use it too -- needed for
+        # mode_select cars where cool and heat share one status code (#336).
+        self.requested_hvac_mode: str = "off"
         self.climate_entity = None
         # mode_select value map (only used when scheme == "mode_select").
         # Maps each logical climate action to the integer sent via the API's
@@ -2454,6 +2459,21 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         s = self.current_remote_climate_status
         if s is None:
             return None
+        # Ambiguous status: cool and heat share this exact status code on this
+        # car (mode_select cars where one status value covers the whole
+        # temperature range -- e.g. AH4EM's mode 2, confirmed #336, #243).
+        # climate_status_heat/climate_status_cool can't disambiguate a value
+        # both point at, so trust what was actually last requested instead of
+        # guessing -- checked first since the sets below would otherwise
+        # always resolve it to whichever is checked first, regardless of
+        # which was really sent.
+        if (
+            self.climate_mode_cool == self.climate_mode_heat
+            and s == self.climate_mode_cool
+        ):
+            if self.requested_hvac_mode in ("cool", "heat"):
+                return self.requested_hvac_mode
+            return "cool"  # never explicitly requested yet -- assume cool
         if s in self.climate_status_heat:
             return "heat"
         if s in self.climate_status_defrost:
