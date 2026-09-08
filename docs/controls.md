@@ -104,7 +104,7 @@ On these models there is **no fan-speed slider** — the car manages its own fan
 | HVAC `Heat` | Heating |
 | HVAC `Fan Only` | Fan without the compressor |
 | HVAC `Off` | Stops all climate activity |
-| Preset `Max Cool` | The strongest cooling the car has, ignoring whatever temperature is set — on the MG4 EV URBAN this is a genuinely different, stronger mode from ordinary `Cool`, not just the same mode with a lower setpoint; it also drops the temperature to the lowest setting in a single tap |
+| Preset `Max Cool` | The strongest cooling the car has, ignoring whatever temperature is set — on the MG4 EV URBAN this is a genuinely different, stronger mode from ordinary `Cool`, not just the same mode with a lower setpoint; it also drops the temperature to the lowest setting in a single tap. Confirmed not reachable through any control the iSmart app itself offers (#336) — like Defrost below, it's a capability this integration adds rather than a mirror of an existing app button |
 | Preset `Defrost` | Windscreen / upper-vent defrost |
  
 > **Note:** not every mode-select car offers all of these. `Heat` and the `Defrost` preset are only shown on models that actually support them.

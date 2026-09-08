@@ -360,8 +360,19 @@ VEHICLE_PROFILES = {
         "climate_mode_defrost": 5,
         "cool_uses_start_ac": True,    # mode 2 is ambiguous -- see notes above
         # Max Cool also pins the setpoint to the profile minimum, on top of
-        # using the genuinely stronger mode 3 -- belt and braces, and matches
-        # the iSmart app's one-tap LOW-cool button (#243).
+        # using the genuinely stronger mode 3 -- belt and braces.
+        #
+        # CORRECTION (#336): an earlier version of this comment claimed Max
+        # Cool matches the app's one-tap LOW-cool button. It doesn't.
+        # @MarcThu checked directly -- the app's dedicated LOW and HIGH
+        # buttons both report mode 2 (same as the slider), never mode 3:
+        #   LOW:  remoteClimateStatus previous=0, current=2
+        #   HIGH: remoteClimateStatus previous=0, current=2
+        # So mode 3, while genuinely real and confirmed cool-only (#243), does
+        # not appear to be reachable through any control the app itself
+        # offers -- Max Cool is a capability this integration adds beyond
+        # what the app can do, the same way the Defrost preset already is,
+        # not a mirror of an existing app feature.
         "max_cool_forces_min_temp": True,
         "climate_status_fan_only": {1},
         "climate_status_cool": {3},    # only the UNAMBIGUOUS cool-only mode
