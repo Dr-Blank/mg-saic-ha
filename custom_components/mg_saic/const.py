@@ -452,11 +452,31 @@ VEHICLE_PROFILES = {
         "climate_mode_cool": 2,        # CONFIRMED (decrypted app traffic)
         "climate_mode_defrost": 5,     # CONFIRMED (front windscreen button)
         "climate_mode_fan_only": 1,    # unconfirmed on MGS6 (no app control)
-        "climate_mode_heat": 4,        # unconfirmed on MGS6 (no app control)
+        # CONFIRMED 2026-09-09 (James, MGS6 EV): selecting Heat in HA at a 20C
+        # target drove remoteClimateStatus 0 -> 4 in a decrypted capture, with
+        # the climate entity, the Climate Mode sensor and HVAC Status all
+        # agreeing, and the car genuinely heating. Mode 4 is real and the car
+        # accepts it -- the "no app control" note below was about the app
+        # offering no way to reach it, not about the mode being doubtful.
+        #
+        # STILL OPEN: whether mode 4 FOLLOWS the requested temperature or is a
+        # fixed max-heat (the mirror of mode 3's max-cool). The iSmart app
+        # showed HIGH at both 24C and 20C, which looked like fixed max-heat --
+        # but the same display also stayed on HIGH after a Cool command, when
+        # the car certainly was not heating, so the app's slider does not
+        # track actual state and cannot settle this. Needs a physical check at
+        # the vents: gently warm at 20C means temperature-following, blasting
+        # means fixed. If fixed, mode 4 belongs in the HIGH preset and
+        # climate_mode_heat should point at 2 (as on AH4EM, #336).
+        "climate_mode_heat": 4,        # CONFIRMED working (see note above)
         "climate_mode_max_cool": 3,    # unconfirmed on MGS6 (no app control)
+        # Covers both the confirmed cool mode (2) and the unconfirmed max-cool
+        # (3), so a reported "cool" here does NOT distinguish which one is
+        # running -- worth knowing when reading logs, since only mode 2 is
+        # ever sent by plain Cool.
         "climate_status_cool": {2, 3},
         "climate_status_fan_only": {1},
-        "climate_status_heat": {4},
+        "climate_status_heat": {4},     # CONFIRMED 2026-09-09, see above
         "climate_status_defrost": {5},
     },
     "MZS3E": {  # MGS5 EV (sister to the MGS6 / MIS3E) — see #277
