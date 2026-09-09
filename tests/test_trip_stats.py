@@ -171,21 +171,70 @@ class TestPhevTrip(unittest.TestCase):
         self.assertIsNone(trip["efficiency_km_per_kWh"])
         self.assertAlmostEqual(trip["fuel_used_litres"], 1.6, places=2)
 
-    def test_fuel_level_rise_is_shown_not_hidden(self):
-        """No refuel-session tracking exists to check against, unlike the
-        SOC case above -- shown as the raw (negative) delta rather than
-        guessed at, with the flag kept as a heads-up rather than a reason to
-        blank the trip."""
+    def test_small_fuel_rise_is_sender_noise_not_a_refuel(self):
+        """A 1-point rise is well inside what slosh moves a fuel sender by.
+        Reported honestly as the raw delta, NOT flagged as a refuel that
+        probably never happened."""
         start = snap(2000.0, soc=70.0, fuel=40.0)
         end = snap(2050.0, soc=60.0, fuel=41.0)
         trip = ts.compute_completed_trip(
             start, end, capacity_kwh=20.0, tank_litres=40.0,
             is_electric=True, is_combustion=True,
         )
-        self.assertTrue(trip["refuelled_during_park"])
+        self.assertFalse(trip["refuelled_during_park"])
         self.assertAlmostEqual(trip["fuel_used_pct"], -1.0, places=3)
         self.assertIsNone(trip["fuel_used_litres"])
         self.assertAlmostEqual(trip["energy_kWh"], 2.0, places=3)  # SOC side unaffected
+
+    def test_harrys_refuel_mid_trip_suppresses_the_misleading_figures(self):
+        """@HarryFlatter's real trip (#354): refuelled ~100 yards in, and
+        because the car holds one trip open across a short stop the whole
+        refuel landed inside it -- giving "fuel used: -48%" over 4.35 miles.
+        A rise that large cannot be sender noise, so the figures are omitted
+        rather than shown wrong."""
+        start = snap(2000.0, soc=70.0, fuel=51.0)
+        end = snap(2007.0, soc=69.5, fuel=99.0)
+        trip = ts.compute_completed_trip(
+            start, end, capacity_kwh=20.0, tank_litres=37.0,
+            is_electric=True, is_combustion=True,
+        )
+        self.assertTrue(trip["refuelled_during_park"])
+        self.assertIsNone(trip["fuel_used_pct"])
+        self.assertIsNone(trip["fuel_used_litres"])
+        self.assertIsNone(trip["fuel_consumption_L_per_100km"])
+        self.assertIsNone(trip["fuel_economy_mpg_uk"])
+        # The electric side is computed independently and must be untouched.
+        self.assertAlmostEqual(trip["soc_used_pct"], 0.5, places=3)
+
+    def test_threshold_boundary(self):
+        """Just under the threshold is noise; at it, a refuel."""
+        below = ts.compute_completed_trip(
+            snap(2000.0, fuel=40.0), snap(2050.0, fuel=44.9),
+            capacity_kwh=None, tank_litres=40.0,
+            is_electric=False, is_combustion=True,
+        )
+        self.assertFalse(below["refuelled_during_park"])
+        self.assertAlmostEqual(below["fuel_used_pct"], -4.9, places=3)
+
+        at = ts.compute_completed_trip(
+            snap(2000.0, fuel=40.0), snap(2050.0, fuel=45.0),
+            capacity_kwh=None, tank_litres=40.0,
+            is_electric=False, is_combustion=True,
+        )
+        self.assertTrue(at["refuelled_during_park"])
+        self.assertIsNone(at["fuel_used_pct"])
+
+    def test_normal_fuel_consumption_is_unaffected(self):
+        """The overwhelmingly common case must be untouched by any of this."""
+        trip = ts.compute_completed_trip(
+            snap(2000.0, fuel=80.0), snap(2050.0, fuel=76.0),
+            capacity_kwh=None, tank_litres=40.0,
+            is_electric=False, is_combustion=True,
+        )
+        self.assertFalse(trip["refuelled_during_park"])
+        self.assertAlmostEqual(trip["fuel_used_pct"], 4.0, places=3)
+        self.assertAlmostEqual(trip["fuel_used_litres"], 1.6, places=2)
+        self.assertIsNotNone(trip["fuel_economy_mpg_uk"])
 
 
 class TestInvalidTrips(unittest.TestCase):

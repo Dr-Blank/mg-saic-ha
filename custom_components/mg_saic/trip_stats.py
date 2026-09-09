@@ -57,6 +57,18 @@ REGEN_ODOMETER_MOVED_KM = 0.05
 # pack reports after a drive.
 MIN_CHARGE_SOC_PCT = 0.5
 
+# A fuel-level RISE of at least this many percentage points across a trip is
+# treated as a refuel rather than sender noise (#354, @HarryFlatter).
+#
+# Unlike the SOC side, there is no refuel-session tracking to check against --
+# the car reports no "refuelling" state, and a refuel leaves no trace beyond
+# the level going up, so this is a magnitude judgement rather than evidence.
+# Fuel senders are genuinely noisy (slosh on hills and cornering moves the
+# reading by a few points either way), so the threshold has to clear that
+# noise floor. 5 points is roughly 2 litres in a 37 L tank -- below any real
+# splash-and-dash, comfortably above ordinary slosh.
+REFUEL_MIN_RISE_PCT = 5.0
+
 # Abandon (rather than record) a charge session left open longer than this —
 # a missed charge-stop shouldn't produce a nonsense figure days later.
 MAX_OPEN_CHARGE_SECONDS = 48 * 3600
@@ -442,16 +454,24 @@ def compute_completed_trip(
     # ── Fuel (ICE/HEV/PHEV) ──────────────────────────────────────────────────
     if is_combustion and start.fuel_pct is not None and end.fuel_pct is not None:
         fuel_used = round(start.fuel_pct - end.fuel_pct, 1)
-        # No refuel-session tracking exists to check against (unlike the SOC
-        # case above, which has real charge-session data available) — a
-        # rise here is left as a negative fuel_used_pct (a small net gain,
-        # most plausibly gauge noise) rather than guessed at. A genuine
-        # refuel mid-trip is rare enough, and a wrong guess costly enough
-        # (silently discarding real consumption figures), that showing the
-        # raw number honestly beats flagging an event we have no way to
-        # actually confirm.
-        if fuel_used < 0:
+        # A rise means the level went UP across the trip. How far up decides
+        # what it was (#354): @HarryFlatter refuelled ~100 yards into a drive,
+        # and because his car keeps one trip open across a short stop, the
+        # whole refuel landed inside the trip -- producing "fuel used: -48%"
+        # for 4.35 miles of driving. Technically correct, and useless: the
+        # figure is dominated by the refuel, not by anything he burned.
+        #
+        # There is no refuel-session tracking to appeal to, unlike the SOC
+        # case above which has real charge sessions -- so this is a magnitude
+        # judgement, not evidence. Past the threshold the reading cannot be
+        # sender noise and the figures are omitted rather than shown wrong,
+        # matching how a confirmed charge already suppresses the electric
+        # figures. Below it, a small rise IS most likely noise, so the raw
+        # number is still reported honestly rather than being flagged as a
+        # refuel that probably never happened.
+        if -fuel_used >= REFUEL_MIN_RISE_PCT:
             trip["refuelled_during_park"] = True
+        elif fuel_used < 0:
             trip["fuel_used_pct"] = fuel_used
         else:
             trip["fuel_used_pct"] = fuel_used
