@@ -32,6 +32,7 @@ from .trip_stats import TripStatsManager, TripSnapshot, ChargeSnapshot
 POST_SHUTDOWN_REFRESH_SEQUENCE = [60, 120, 240, 480, 600]
 
 from .const import (
+    CLIMATE_STATUS_LOCAL_CONTROL,
     DATA_DECIMAL_CORRECTION,
     DATA_DECIMAL_CORRECTION_SOC,
     MILEAGE_UINT16_SATURATION,
@@ -2235,6 +2236,62 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
             "Front defrost blocked: the air conditioning is already running",
         )
 
+    def is_climate_under_local_control(self) -> bool:
+        """True when the car reports its climate running under LOCAL control.
+
+        remoteClimateStatus == 6 means the driver is operating the climate from
+        the car's own dashboard, typically while driving. Confirmed SAIC-wide
+        rather than per-profile: a 2026-07-17 capture with the car powered on
+        (engineStatus=1, powerMode=2) but the climate switched OFF read 0, not
+        6, which rules out 6 being a generic "car is on" flag.
+
+        The car rejects remote climate commands while it is in this state, but
+        SAIC's rejection is the same generic "remote control instruction
+        failed, please try again later" it returns for everything else, so
+        without this check the user is told nothing useful about why.
+        """
+        return self.current_remote_climate_status == CLIMATE_STATUS_LOCAL_CONTROL
+
+    async def notify_climate_local_control(
+        self, vin: str, source: str | None = None
+    ) -> None:
+        """Explain that a climate command was not sent because the driver has
+        local control of the climate.
+
+        Mirrors notify_front_defrost_blocked: a persistent notification plus a
+        command_error record, so the Logbook entry says what actually happened
+        instead of SAIC's generic failure text.
+        """
+        vin_info = getattr(self, "vin_info", None)
+        if vin_info is not None:
+            vehicle_label = f"{vin_info.brandName} {vin_info.modelName} (VIN: {vin})"
+        else:
+            vehicle_label = f"VIN: {vin}"
+
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "MG SAIC: Climate Under Local Control",
+                "message": (
+                    f"The climate command was not sent to {vehicle_label} "
+                    "because the car's climate is currently being operated "
+                    "from the car itself.\n\n"
+                    "**To fix:** use the car's own climate controls while you "
+                    "are in it, or wait until the car is parked and powered "
+                    "off before sending remote commands.\n\n"
+                    "The command was not sent, so it has not used up one of "
+                    "the vehicle's limited remote commands."
+                ),
+                "notification_id": f"mg_saic_climate_local_control_{vin}",
+            },
+        )
+        LOGGER.warning("Climate command skipped (local control) for %s", vehicle_label)
+        self.record_command_error(
+            source or "climate",
+            "Climate command not sent: the car's climate is under local control",
+        )
+
     def is_climate_blocking_airflow(self) -> bool:
         """True when the AC is running and would block AC Airflow.
 
@@ -2484,7 +2541,7 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
             return "fan_only"
         if s == 0:
             return "off"
-        if s == 6:
+        if s == CLIMATE_STATUS_LOCAL_CONTROL:
             # 6 = the climate is running under LOCAL control — i.e. the driver
             # is operating it from the dashboard (typically while driving), not
             # a remote command. Confirmed SAIC-wide, not tied to a profile.

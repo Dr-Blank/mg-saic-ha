@@ -959,6 +959,11 @@ CONF_STALE_DATA_THRESHOLD = "stale_data_threshold_hours"
 CONF_BATTERY_CAPACITY_OVERRIDE = "battery_capacity_override_kwh"
 CONF_FUEL_TANK_OVERRIDE = "fuel_tank_override_litres"
 
+# remoteClimateStatus value meaning "the climate is running, under the
+# driver's own local control" (see the evidence note further down this file).
+# SAIC-wide, not per-profile.
+CLIMATE_STATUS_LOCAL_CONTROL = 6
+
 
 def parse_capacity_override(raw):
     """Parse a user battery-capacity override option into kWh, or None.
