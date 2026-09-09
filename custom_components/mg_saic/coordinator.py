@@ -1548,11 +1548,19 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
     def _extract_pack_energy_kwh(self, charging_data):
         """Energy currently held in the pack (kWh), per the car's own figures.
 
-        ``lastChargeEndingPower`` is what the pack held when the last charge
-        finished; ``powerUsageSinceLastCharge`` is what has been taken out
-        since. The difference is therefore the energy in the pack right now,
-        and it holds at both charge boundaries — at the end of a charge the
-        since-charge counter is ~0, so it collapses to lastChargeEndingPower.
+        A backend that reports pack energy outright, in real kWh, wins:
+        ``packEnergyKwh`` is taken as-is, with no decimal or per-model energy
+        correction, because it never went through the global raw scales those
+        corrections exist to undo. India reports it; without it Last
+        Charge Energy stayed blank on every India car, since the reconstruction
+        below has nothing to work with there.
+
+        Otherwise it is reconstructed. ``lastChargeEndingPower`` is what the
+        pack held when the last charge finished; ``powerUsageSinceLastCharge``
+        is what has been taken out since. The difference is therefore the
+        energy in the pack right now, and it holds at both charge boundaries —
+        at the end of a charge the since-charge counter is ~0, so it collapses
+        to lastChargeEndingPower.
 
         Both fields are inflated ~3× on some models, so both get the profile's
         charging_capacity_correction (#262). Returns None if either is missing.
@@ -1560,6 +1568,9 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         rcs = getattr(charging_data, "rvsChargeStatus", None) if charging_data else None
         if rcs is None:
             return None
+        direct = getattr(rcs, "packEnergyKwh", None)
+        if direct is not None and direct >= 0:
+            return float(direct)
         raw = getattr(rcs, "lastChargeEndingPower", None)
         if raw is None or raw < 0:
             return None
