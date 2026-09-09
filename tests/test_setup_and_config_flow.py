@@ -666,6 +666,51 @@ class TestReachabilityDebounce(unittest.TestCase):
         self.assertTrue(c._code4_this_cycle)
 
 
+class PackEnergyTests(unittest.TestCase):
+    """#302: a backend that knows its pack energy in real kWh short-circuits
+    the global reconstruction.
+
+    Without this, Last Charge Energy was blank on every India car: the frame
+    has no lastChargeEndingPower the global identity can use, and no
+    totalBatteryCapacity for the SOC route to fall back on.
+    """
+
+    def _coordinator(self, rvs, correction=None):
+        Coord = sys.modules["mg_saic.coordinator"].SAICMGDataUpdateCoordinator
+        c = Coord.__new__(Coord)
+        c.charging_capacity_correction = correction
+        c.data = {"charging": types.SimpleNamespace(rvsChargeStatus=rvs)}
+        return c
+
+    def test_direct_pack_energy_wins_over_the_reconstruction(self):
+        # A backend that reports pack energy outright is authoritative, even
+        # when the reconstruction inputs are also present and disagree.
+        c = self._coordinator(
+            types.SimpleNamespace(
+                packEnergyKwh=23.4,
+                lastChargeEndingPower=234,
+                powerUsageSinceLastCharge=124,
+            )
+        )
+        self.assertAlmostEqual(c._extract_pack_energy_kwh(c.data["charging"]), 23.4)
+
+    def test_direct_pack_energy_skips_the_energy_correction(self):
+        # packEnergyKwh never went through the global raw scales, so the ~3×
+        # per-model correction must not be applied to it.
+        c = self._coordinator(
+            types.SimpleNamespace(packEnergyKwh=23.4), correction=1 / 3
+        )
+        self.assertAlmostEqual(c._extract_pack_energy_kwh(c.data["charging"]), 23.4)
+
+    def test_global_reconstruction_is_unchanged_without_the_field(self):
+        c = self._coordinator(
+            types.SimpleNamespace(
+                lastChargeEndingPower=600, powerUsageSinceLastCharge=100
+            )
+        )
+        self.assertAlmostEqual(c._extract_pack_energy_kwh(c.data["charging"]), 50.0)
+
+
 # ── Issue #250: in-place password update (reauth) ────────────────────────────
 
 
