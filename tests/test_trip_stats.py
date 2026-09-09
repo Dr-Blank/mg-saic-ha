@@ -139,7 +139,7 @@ class TestIceTrip(unittest.TestCase):
             start, end, capacity_kwh=None, tank_litres=50.0,
             is_electric=False, is_combustion=True,
         )
-        self.assertTrue(trip["refuelled_during_park"])
+        self.assertTrue(trip["refuel_detected"])
         self.assertIsNone(trip["fuel_used_litres"])
 
 
@@ -181,7 +181,7 @@ class TestPhevTrip(unittest.TestCase):
             start, end, capacity_kwh=20.0, tank_litres=40.0,
             is_electric=True, is_combustion=True,
         )
-        self.assertFalse(trip["refuelled_during_park"])
+        self.assertFalse(trip["refuel_detected"])
         self.assertAlmostEqual(trip["fuel_used_pct"], -1.0, places=3)
         self.assertIsNone(trip["fuel_used_litres"])
         self.assertAlmostEqual(trip["energy_kWh"], 2.0, places=3)  # SOC side unaffected
@@ -198,7 +198,7 @@ class TestPhevTrip(unittest.TestCase):
             start, end, capacity_kwh=20.0, tank_litres=37.0,
             is_electric=True, is_combustion=True,
         )
-        self.assertTrue(trip["refuelled_during_park"])
+        self.assertTrue(trip["refuel_detected"])
         self.assertIsNone(trip["fuel_used_pct"])
         self.assertIsNone(trip["fuel_used_litres"])
         self.assertIsNone(trip["fuel_consumption_L_per_100km"])
@@ -213,7 +213,7 @@ class TestPhevTrip(unittest.TestCase):
             capacity_kwh=None, tank_litres=40.0,
             is_electric=False, is_combustion=True,
         )
-        self.assertFalse(below["refuelled_during_park"])
+        self.assertFalse(below["refuel_detected"])
         self.assertAlmostEqual(below["fuel_used_pct"], -4.9, places=3)
 
         at = ts.compute_completed_trip(
@@ -221,7 +221,7 @@ class TestPhevTrip(unittest.TestCase):
             capacity_kwh=None, tank_litres=40.0,
             is_electric=False, is_combustion=True,
         )
-        self.assertTrue(at["refuelled_during_park"])
+        self.assertTrue(at["refuel_detected"])
         self.assertIsNone(at["fuel_used_pct"])
 
     def test_normal_fuel_consumption_is_unaffected(self):
@@ -231,7 +231,7 @@ class TestPhevTrip(unittest.TestCase):
             capacity_kwh=None, tank_litres=40.0,
             is_electric=False, is_combustion=True,
         )
-        self.assertFalse(trip["refuelled_during_park"])
+        self.assertFalse(trip["refuel_detected"])
         self.assertAlmostEqual(trip["fuel_used_pct"], 4.0, places=3)
         self.assertAlmostEqual(trip["fuel_used_litres"], 1.6, places=2)
         self.assertIsNotNone(trip["fuel_economy_mpg_uk"])

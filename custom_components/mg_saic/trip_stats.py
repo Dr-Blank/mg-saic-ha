@@ -415,7 +415,7 @@ def compute_completed_trip(
         "fuel_consumption_L_per_100km": None,
         "fuel_economy_mpg_uk": None,
         "fuel_economy_mpg_us": None,
-        "refuelled_during_park": False,
+        "refuel_detected": False,
     }
     if counter_reset_detected:
         # Distance came from the odometer (see above) because the since-charge
@@ -470,7 +470,12 @@ def compute_completed_trip(
         # number is still reported honestly rather than being flagged as a
         # refuel that probably never happened.
         if -fuel_used >= REFUEL_MIN_RISE_PCT:
-            trip["refuelled_during_park"] = True
+            # Named refuel_detected, not refuelled_during_park (its name until
+            # 1.2.9-beta6): nothing here examines whether the car was parked.
+            # It compares the fuel level at the start of the trip against the
+            # end, so on a car that holds one trip open across a short stop
+            # the "park" was never part of the test.
+            trip["refuel_detected"] = True
         elif fuel_used < 0:
             trip["fuel_used_pct"] = fuel_used
         else:

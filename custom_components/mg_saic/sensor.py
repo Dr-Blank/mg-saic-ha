@@ -3283,7 +3283,7 @@ _TRIP_ATTR_KEYS = (
     "fuel_economy_mpg_uk",
     "fuel_economy_mpg_us",
     "charged_during_park",
-    "refuelled_during_park",
+    "refuel_detected",
     "start_ts",
     "end_ts",
     "retrospective",
