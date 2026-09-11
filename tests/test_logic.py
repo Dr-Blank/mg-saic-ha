@@ -510,5 +510,53 @@ class ResolveFuelTankLitresTests(unittest.TestCase):
         self.assertAlmostEqual(19.0 / 100.0 * litres, 10.45, places=2)
 
 
+class ChargingDurationScaleTests(unittest.TestCase):
+    """chargingDuration is reported in SECONDS (#262).
+
+    It was multiplied by 0.01 and published as minutes, which under-reported
+    every charge by a factor of 0.6 -- and because it is cumulative, the gap
+    widened the longer the charge ran, which is what made it noticeable.
+    """
+
+    @staticmethod
+    def _factor():
+        """Read the constant from source -- importing const.py pulls in
+        Home Assistant, which this suite deliberately runs without."""
+        import re
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parent.parent
+        const = (src / "custom_components" / "mg_saic" / "const.py").read_text()
+        m = re.search(r"^SECONDS_TO_MINUTES\s*=\s*(.+)$", const, re.M)
+        assert m, "SECONDS_TO_MINUTES not found in const.py"
+        return eval(m.group(1))
+
+    def test_conversion_matches_two_real_cars(self):
+        SECONDS_TO_MINUTES = self._factor()
+
+        # @HarryFlatter's completed charge: raw 25085, car showed 6h58m.
+        minutes = 25085 * SECONDS_TO_MINUTES
+        self.assertEqual(int(minutes // 60), 6)
+        self.assertEqual(int(minutes % 60), 58)
+
+        # James's MGS6: raw advanced exactly 308 per poll, polls 5m08s apart.
+        self.assertAlmostEqual(308 * SECONDS_TO_MINUTES, 5 + 8 / 60, places=4)
+
+    def test_the_old_factor_is_not_used_for_this_field(self):
+        """Guard against reverting to DATA_100_DECIMAL_CORRECTION, which is
+        right for other fields but wrong here."""
+        import re
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parent.parent
+        sensor = (src / "custom_components" / "mg_saic" / "sensor.py").read_text()
+        block = re.search(
+            r'"Charging Duration",.*?\),', sensor, re.S
+        )
+        self.assertIsNotNone(block, "Charging Duration registration not found")
+        self.assertIn("SECONDS_TO_MINUTES", block.group(0))
+        self.assertNotIn("DATA_100_DECIMAL_CORRECTION", block.group(0))
+
+
 if __name__ == "__main__":
     unittest.main()
