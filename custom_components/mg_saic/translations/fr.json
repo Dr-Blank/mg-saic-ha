@@ -453,7 +453,8 @@
           "event_type": {
             "state": {
               "command_error": "Échec de la commande",
-              "command_limit_reached": "Limite de commandes atteinte"
+              "command_limit_reached": "Limite de commandes atteinte",
+              "vehicle_not_locked": "Véhicule non verrouillé"
             }
           }
         }

@@ -2161,6 +2161,63 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
                 source or "unknown command"
             )
 
+    async def notify_vehicle_not_locked(
+        self, vin: str, source: str | None = None
+    ) -> None:
+        """Fire a persistent notification when a command is rejected because
+        the vehicle is not locked.
+
+        SAIC uses the same return code (8) for this as the real remote-command
+        limit, and until #374 (@stfvrg) this integration reported both as
+        "command limit reached" — telling the user to start the car with the
+        physical key, which does nothing here and isn't needed: the same
+        command succeeds immediately once the vehicle is locked. This gives it
+        its own notification with the actually-correct fix.
+
+        Also fires a dedicated vehicle_not_locked event via the command-error
+        Event entity (if registered), so it's flagged distinctly from both a
+        genuine command limit and a generic command failure in the Logbook.
+
+        Args:
+            vin: the vehicle's VIN.
+            source: optional short identifier of which command was rejected
+                (e.g. "climate.set_hvac_mode"), included in the event data
+                for diagnostics. Existing callers that don't pass this still
+                work — it simply falls back to a generic label.
+        """
+        vin_info = getattr(self, "vin_info", None)
+        if vin_info is not None:
+            vehicle_label = (
+                f"{vin_info.brandName} {vin_info.modelName} (VIN: {vin})"
+            )
+        else:
+            vehicle_label = f"VIN: {vin}"
+
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": "MG SAIC: Vehicle Not Locked",
+                "message": (
+                    f"The last remote command to {vehicle_label} was rejected "
+                    "because the vehicle is not locked.\n\n"
+                    "**To fix:** lock the vehicle (with the key fob or the "
+                    "iSmart app), then send the command again — no physical "
+                    "key start is needed for this."
+                ),
+                "notification_id": f"mg_saic_vehicle_not_locked_{vin}",
+            },
+        )
+        LOGGER.warning(
+            "Persistent notification fired: vehicle not locked for %s",
+            vehicle_label,
+        )
+
+        if self._command_error_event_entity is not None:
+            self._command_error_event_entity.record_vehicle_not_locked(
+                source or "unknown command"
+            )
+
     def is_climate_blocking_defrost(self) -> bool:
         """True when a running climate mode would block front defrost.
 
