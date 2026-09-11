@@ -3491,9 +3491,14 @@ class SAICMGBatteryEnergySensor(CoordinatorEntity, SensorEntity):
             return round(reported, 3)
 
         # Fallback: SOC x usable capacity.
-        soc = self.coordinator._extract_soc_pct(
-            (self.coordinator.data or {}).get("status"), charging_data
-        )
+        # NB: _extract_soc_pct takes basicVehicleStatus, NOT the top-level
+        # status object. Passing the latter silently loses the extendedData1
+        # fallback inside it, so a charging-endpoint dropout would blank this
+        # sensor instead of falling through -- the same mistake that left
+        # Efficiency Since Charge permanently Unknown on every car (#262).
+        status = (self.coordinator.data or {}).get("status")
+        basic_status = getattr(status, "basicVehicleStatus", None)
+        soc = self.coordinator._extract_soc_pct(basic_status, charging_data)
         capacity = self.coordinator.effective_battery_capacity_kwh
         if soc is None or not capacity:
             self._source = None
