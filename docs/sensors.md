@@ -68,6 +68,7 @@ The MG/SAIC Custom Integration provides the following sensors, binary sensors, a
 - Last Trip Efficiency *(BEV/PHEV; switchable km/kWh · mi/kWh · kWh/100km, full breakdown in attributes)*
 - Last Trip Fuel Economy *(ICE/HEV/PHEV; L/100km, with the full breakdown in its attributes)*
 - Total Battery Capacity *(kWh; corrected for models where the API reports an inaccurate value, and can be overridden per vehicle — see [Battery capacity override](#battery-capacity-override))*
+- Battery Energy *(kWh; how much energy is in the battery right now — the car's own figure where it reports one, otherwise battery percentage × usable capacity. A `source` attribute says which: `reported` or `estimated`)*
 - Battery Heating Status *(if equipped)*
 - Reachability *(is the car awake / likely asleep / unreachable — see [Deep sleep & holiday mode](power-management.md#deep-sleep--holiday-mode))*
 - Data Freshness *(diagnostic: whether the last poll returned `live`, `cached` or `failed` data — see [Data Freshness sensor](power-management.md#data-freshness-sensor))*

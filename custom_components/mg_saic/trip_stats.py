@@ -721,6 +721,10 @@ class TripStatsManager:
         # The previous parked SOC/odometer reading. Used to tell a charge from
         # regen: both raise SOC, but only regen moves the odometer (#354).
         self.last_parked_soc_reading: dict[str, Any] | None = None
+        # Last snapshot seen while plugged in but NOT yet charging. Used as the
+        # charge baseline when a session opens, so energy delivered before the
+        # first "charging" poll is not lost (see note_charge_state).
+        self.pre_charge_snapshot: "ChargeSnapshot | None" = None
         # Charging-session tracking (#262): the snapshot taken when a charge
         # started, and the last completed charge. Powers the Last Charge Energy
         # sensor — the API has no "energy added by that charge" field.
@@ -743,6 +747,9 @@ class TripStatsManager:
         self.soc_reset_baseline = data.get("soc_reset_baseline")
         self.last_parked_soc_reading = data.get("last_parked_soc_reading")
         self.open_charge = ChargeSnapshot.from_dict(data.get("open_charge"))
+        self.pre_charge_snapshot = ChargeSnapshot.from_dict(
+            data.get("pre_charge_snapshot")
+        )
         self.last_charge = data.get("last_charge")
 
     async def async_save(self) -> None:
@@ -765,6 +772,11 @@ class TripStatsManager:
                 "last_parked_soc_reading": self.last_parked_soc_reading,
                 "open_charge": (
                     self.open_charge.to_dict() if self.open_charge else None
+                ),
+                "pre_charge_snapshot": (
+                    self.pre_charge_snapshot.to_dict()
+                    if self.pre_charge_snapshot
+                    else None
                 ),
                 "last_charge": self.last_charge,
             }
@@ -901,6 +913,7 @@ class TripStatsManager:
         *,
         capacity_kwh: float | None,
         now_iso: str,
+        is_plugged_in: bool = False,
     ) -> tuple[dict[str, Any] | None, bool]:
         """Open/close a charging session (#262).
 
@@ -919,10 +932,42 @@ class TripStatsManager:
 
         if is_charging:
             if self.open_charge is None:
-                self.open_charge = snapshot
+                # Prefer a snapshot taken while plugged in but not yet
+                # charging. Charging routinely starts between polls -- on a
+                # scheduled/off-peak charge the car can be plugged in for
+                # hours first, and the poll interval only drops to the
+                # charging cadence once we have SEEN it charging. James's
+                # MGS6: plugged in at 16:43 at 68.9%, first charging poll at
+                # 18:51 already reading 72.5%. Baselining on that first
+                # charging poll silently discarded ~2.7 kWh, and Last Charge
+                # Energy reported 4.83 kWh against the charger's 9.1 kWh.
+                #
+                # Only used when SOC has not dropped since, so a car that sat
+                # plugged in losing charge to vampire drain (or one where the
+                # pre-charge reading is simply stale) falls back to the
+                # charging snapshot rather than inflating the figure.
+                baseline = snapshot
+                pre = self.pre_charge_snapshot
+                if (
+                    pre is not None
+                    and pre.soc_pct is not None
+                    and snapshot.soc_pct is not None
+                    and pre.soc_pct <= snapshot.soc_pct
+                ):
+                    age = _duration_seconds(pre.ts, now_iso)
+                    if age is not None and age <= MAX_OPEN_CHARGE_SECONDS:
+                        baseline = pre
+                self.open_charge = baseline
+                self.pre_charge_snapshot = None
                 return None, True
             # Already charging — nothing to do. The start snapshot stands.
             return None, False
+
+        # Not charging. Remember this as the pre-charge baseline while the car
+        # is plugged in, so a session opening on a later poll can reach back
+        # to it. Cleared when unplugged so a snapshot from a previous session
+        # can never leak into the next one.
+        self.pre_charge_snapshot = snapshot if is_plugged_in else None
 
         if self.open_charge is None:
             return None, False

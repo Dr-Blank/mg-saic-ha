@@ -1659,11 +1659,17 @@ class SAICMGDataUpdateCoordinator(DataUpdateCoordinator):
         status = getattr(chrg_mgmt_data, "bmsChrgSts", None)
         if status is None:
             return
+        # Plugged in but not yet charging is the state we want to remember as
+        # a charge baseline -- see note_charge_state. chargingGunState lives on
+        # rvsChargeStatus, not chrgMgmtData.
+        rcs = getattr(charging_data, "rvsChargeStatus", None)
+        gun_connected = bool(getattr(rcs, "chargingGunState", False)) if rcs else False
         charge, changed = self.trip_stats.note_charge_state(
             status in CHARGE_SESSION_STATUS_CODES,
             self._charge_snapshot(basic_status, charging_data),
             capacity_kwh=self.effective_battery_capacity_kwh,
             now_iso=datetime.now(timezone.utc).isoformat(),
+            is_plugged_in=gun_connected,
         )
         if charge is not None:
             LOGGER.debug("Charge session completed for VIN %s: %s", self.vin, charge)
