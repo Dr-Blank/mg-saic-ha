@@ -3443,23 +3443,37 @@ class SAICMGEfficiencySinceChargeSensor(CoordinatorEntity, SensorEntity):
 class SAICMGBatteryEnergySensor(CoordinatorEntity, SensorEntity):
     """Energy currently held in the battery, in kWh.
 
-    Two sources, in order:
+    Two sources, in this order:
 
-    1. The car's own figures. India reports pack energy outright; elsewhere it
-       is reconstructed as ``lastChargeEndingPower - powerUsageSinceLastCharge``
-       -- what the pack held when the last charge ended, minus what has been
-       taken out since. Both are real API fields, so this is the car's own
-       accounting rather than our arithmetic.
-    2. Failing that, SOC% x usable capacity. Needed because some cars never
-       populate lastChargeEndingPower at all (the MG HS PHEV reports it as
-       None), which would otherwise leave this permanently blank on exactly
-       the cars that already have the least charging telemetry.
+    1. SOC% x the resolved usable capacity, whenever we have a capacity we
+       trust (a user override or our per-model profile).
+    2. The car's own pack-energy figure, when we have no capacity at all.
 
-    The ``source`` attribute says which was used: ``reported`` or
-    ``estimated``. They will not always agree -- the reported route inherits
-    whatever drift is in the car's own counters, while the estimated route
-    inherits the usable-capacity figure and the coarseness of SOC -- so the
-    attribute matters if the number ever looks off.
+    That order is deliberate, and it is the REVERSE of how this sensor
+    originally shipped. Preferring the car's figure looked obviously right --
+    the car ought to know its own pack better than we do -- but @SteveMSJ
+    showed (#371) that on the cars where it matters, it doesn't:
+
+        MG4 Trophy LR: SOC 72.7%, reported 52.70 kWh. 52.70 / 0.727 = 72.5,
+        exactly the API's placeholder capacity, NOT the owner's 61.7 kWh
+        override.
+
+        MGS6: SOC 74.8%, reported 54.3 kWh, implying 72.6 kWh against a
+        profile capacity of 74.3.
+
+    So the reported figure behaves as SOC x a nominal pack size the car holds
+    internally, rather than an independent BMS measurement. It therefore adds
+    no information the SOC does not already carry, while inheriting a capacity
+    we have specifically decided not to trust -- and it did so silently, since
+    ``source: reported`` reads as authoritative. Preferring it defeated the
+    battery capacity override, which exists precisely to correct that number.
+
+    The reported route is kept for the case where it IS the only real source:
+    India-region cars report genuine pack energy in kWh from the BMS and carry
+    no capacity field at all, so there is nothing to calculate from there.
+
+    The ``source`` attribute says which was used: ``estimated`` or
+    ``reported``.
     """
 
     def __init__(self, coordinator, entry):
@@ -3486,12 +3500,9 @@ class SAICMGBatteryEnergySensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         charging_data = (self.coordinator.data or {}).get("charging")
-        reported = self.coordinator._extract_pack_energy_kwh(charging_data)
-        if reported is not None and reported >= 0:
-            self._source = "reported"
-            return round(reported, 3)
 
-        # Fallback: SOC x usable capacity.
+        # Preferred: SOC x the capacity we resolved, so a capacity override or
+        # profile figure actually governs this sensor (#371).
         # NB: _extract_soc_pct takes basicVehicleStatus, NOT the top-level
         # status object. Passing the latter silently loses the extendedData1
         # fallback inside it, so a charging-endpoint dropout would blank this
@@ -3501,11 +3512,20 @@ class SAICMGBatteryEnergySensor(CoordinatorEntity, SensorEntity):
         basic_status = getattr(status, "basicVehicleStatus", None)
         soc = self.coordinator._extract_soc_pct(basic_status, charging_data)
         capacity = self.coordinator.effective_battery_capacity_kwh
-        if soc is None or not capacity:
-            self._source = None
-            return None
-        self._source = "estimated"
-        return round(soc / 100.0 * capacity, 3)
+        if soc is not None and capacity:
+            self._source = "estimated"
+            return round(soc / 100.0 * capacity, 3)
+
+        # No capacity to calculate from (an unprofiled car with no override,
+        # or India, whose frames carry no capacity field). The car's own
+        # pack-energy figure is then the only source there is.
+        reported = self.coordinator._extract_pack_energy_kwh(charging_data)
+        if reported is not None and reported >= 0:
+            self._source = "reported"
+            return round(reported, 3)
+
+        self._source = None
+        return None
 
     @property
     def extra_state_attributes(self):

@@ -68,7 +68,7 @@ The MG/SAIC Custom Integration provides the following sensors, binary sensors, a
 - Last Trip Efficiency *(BEV/PHEV; switchable km/kWh · mi/kWh · kWh/100km, full breakdown in attributes)*
 - Last Trip Fuel Economy *(ICE/HEV/PHEV; L/100km, with the full breakdown in its attributes)*
 - Total Battery Capacity *(kWh; corrected for models where the API reports an inaccurate value, and can be overridden per vehicle — see [Battery capacity override](#battery-capacity-override))*
-- Battery Energy *(kWh; how much energy is in the battery right now — the car's own figure where it reports one, otherwise battery percentage × usable capacity. A `source` attribute says which: `reported` or `estimated`)*
+- Battery Energy *(kWh; how much energy is in the battery right now — battery percentage × usable capacity, falling back to the car's own pack-energy figure only where no capacity is known. A `source` attribute says which: `estimated` or `reported` — see [Battery Energy and capacity](#battery-energy-and-capacity))*
 - Battery Heating Status *(if equipped)*
 - Reachability *(is the car awake / likely asleep / unreachable — see [Deep sleep & holiday mode](power-management.md#deep-sleep--holiday-mode))*
 - Data Freshness *(diagnostic: whether the last poll returned `live`, `cached` or `failed` data — see [Data Freshness sensor](power-management.md#data-freshness-sensor))*
@@ -381,6 +381,16 @@ The **Usable battery capacity override (kWh)** option (under **Configure**) lets
 The Total Battery Capacity sensor carries a `capacity_source` attribute (`user_override`, `profile`, or `api`) so you can see — and template off — exactly where the displayed figure came from. The same resolved figure feeds every energy calculation derived from capacity, so the displayed pack size and the sensors derived from it can't disagree.
 
 Where a car reports a capacity that can't be trusted, none is used: the `totalBatteryCapacity=725` placeholder (→ 72.5 kWh) is rejected outright, as is anything outside 5–200 kWh. On such a car with no profile figure and no override, Total Battery Capacity reads blank and `capacity_source` is absent, rather than showing a number the car invented and deriving charge and efficiency figures from it. Setting a [battery capacity override](#battery-capacity-override) is the fix if you know your real capacity.
+
+### Battery Energy and capacity
+
+**Battery Energy** is calculated as battery percentage × the usable capacity resolved above, so a [battery capacity override](#battery-capacity-override) governs it directly. The `source` attribute reads `estimated` in that case.
+
+It only falls back to the car's own reported pack-energy figure — `source: reported` — where no capacity is available at all: an unprofiled model with no override, or an India-region car, whose charging frames carry real BMS pack energy in kWh but no capacity field to calculate from.
+
+That order is deliberate, and it changed in **1.2.9-beta9**. The sensor originally preferred the car's reported figure, on the reasonable-sounding basis that the car knows its own pack. In practice it doesn't: on the models where it matters, that figure behaves as battery percentage × a nominal pack size held internally by the car, not as an independent BMS measurement. An MG4 Trophy LR reporting 52.70 kWh at 72.7% implies 72.5 kWh — the API's known-wrong placeholder — rather than the owner's 61.7 kWh override. So the reported figure added nothing the percentage didn't already give, while quietly inheriting the very capacity the override exists to correct.
+
+If you have a capacity override set and this sensor still reads `reported`, that means the override isn't being picked up — worth checking it's saved correctly.
 
 ### Fuel tank size override
 
