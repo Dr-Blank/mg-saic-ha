@@ -984,6 +984,14 @@ CONF_FUEL_TANK_OVERRIDE = "fuel_tank_override_litres"
 # SAIC-wide, not per-profile.
 CLIMATE_STATUS_LOCAL_CONTROL = 6
 
+# rvsChargeStatus.chargingDuration is reported in SECONDS. Confirmed twice:
+# @HarryFlatter's HS PHEV (raw 25085 = 6h58m, matching the car) and James's
+# MGS6, where the raw value advanced exactly 308 per poll against a 5m08s
+# poll interval. Converting to the minutes the sensor declares is /60 -- it
+# was previously multiplied by 0.01, which under-reported every charge by a
+# factor of 0.6 and drifted further the longer the charge ran (#262).
+SECONDS_TO_MINUTES = 1.0 / 60.0
+
 
 def parse_capacity_override(raw):
     """Parse a user battery-capacity override option into kWh, or None.

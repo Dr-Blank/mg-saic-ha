@@ -18,6 +18,7 @@ from .backends import Feature, REGION_INDIA
 from datetime import datetime, timezone
 
 from .const import (
+    SECONDS_TO_MINUTES,
     DOMAIN,
     LOGGER,
     TEMP_SPIKE_BASE_TOLERANCE_C,
@@ -472,7 +473,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                         UnitOfTime.MINUTES,
                         "mdi:timer-outline",
                         "measurement",
-                        DATA_100_DECIMAL_CORRECTION,
+                        SECONDS_TO_MINUTES,
                         "rvsChargeStatus",
                         "charging",
                     ),

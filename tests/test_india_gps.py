@@ -155,6 +155,7 @@ def _load_modules():
             CHARGING_CURRENT_FACTOR=1,
             CHARGING_VOLTAGE_FACTOR=1,
             DATA_100_DECIMAL_CORRECTION=0.01,
+            SECONDS_TO_MINUTES=1.0 / 60.0,
             DATA_DECIMAL_CORRECTION=0.1,
             DATA_DECIMAL_CORRECTION_SOC=0.1,
             DATA_FRESHNESS_CACHED="cached",
