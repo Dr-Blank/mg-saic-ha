@@ -87,6 +87,65 @@ The integration derives per-trip and per-charge efficiency from data it already 
 
 Also in the attributes: `range_added_km` (with `range_start_km` / `range_end_km`), `soc_start_pct`, `soc_end_pct`, `soc_added_pct`, `duration_s`, `average_power_kW`, `method` (which figure was used), and the session's start/end timestamps. A `mg_saic_charge_completed` event fires when a charge finishes, carrying the same data, so you can log or notify on it.
 
+
+### Working out your charging losses
+
+A common question is why the energy your wall charger reports is higher than **Last Charge Energy**. It's not an error in either figure — they measure different things:
+
+- Your charger meters what leaves the wall.
+- This integration measures what arrives in the **battery**.
+
+The difference is real energy, lost as heat in the cable, the charger, and the car's onboard AC-to-DC conversion. A gap of roughly 10–20% on AC charging is normal.
+
+The integration can't calculate this for you, because it has no visibility of your charger — that data lives in whatever integration talks to your Ohme, Zappi, wallbox or clamp. But it gives you everything needed to work it out yourself, and the `mg_saic_charge_completed` event is the piece that makes it straightforward: it fires when a charge finishes and carries the session's exact start and end timestamps alongside the energy that reached the battery.
+
+A minimal approach: record your charger's cumulative energy total when the car starts charging, then compare on the event.
+
+```yaml
+# Snapshot the charger's lifetime total when charging begins
+automation:
+  - alias: "Charge start - snapshot charger total"
+    triggers:
+      - trigger: state
+        entity_id: sensor.YOUR_CAR_charging_status
+        to: "Charging (AC)"
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.charger_total_at_charge_start
+        data:
+          value: "{{ states('sensor.YOUR_CHARGER_total_energy') | float(0) }}"
+
+# Work out the loss when the charge completes
+  - alias: "Charge complete - calculate losses"
+    triggers:
+      - trigger: event
+        event_type: mg_saic_charge_completed
+    actions:
+      - variables:
+          wall: >
+            {{ (states('sensor.YOUR_CHARGER_total_energy') | float(0))
+               - (states('input_number.charger_total_at_charge_start') | float(0)) }}
+          battery: "{{ trigger.event.data.energy_added_kWh | float(0) }}"
+      - action: logbook.log
+        data:
+          name: "Charge efficiency"
+          message: >
+            {{ battery | round(2) }} kWh to battery from
+            {{ wall | round(2) }} kWh at the wall
+            ({{ (100 * battery / wall) | round(1) if wall > 0 else 'n/a' }}%)
+```
+
+Replace the entity IDs with your own. If your charger reports **per-session** energy rather than a lifetime total, skip the first automation entirely and read that sensor directly in the second.
+
+**Worth knowing before you trust a single number:**
+
+- **Efficiency is not a constant.** It varies with ambient temperature, charging current, whether the battery needed heating, and how long the charge spent tapering at low power near the end. One session tells you very little; an average across many tells you something useful.
+- **Only count charges at the charger you're measuring.** A session away from home will show a huge apparent loss, because your home charger recorded nothing while the battery gained energy.
+- **Timing isn't exact.** Your charger may draw for a short period after the car reports the charge finished, so expect a little noise per session.
+
+If you want the battery-side figure on its own rather than per charge, the **Battery Energy** sensor reports how much energy is in the pack at any moment.
+
 The same figure is also published as its own **Last Charge Range Added** sensor. Prefer that one for dashboards: sensor states are converted to your Home Assistant unit system (so miles on an imperial setup), whereas attribute values never are — the `*_km` attributes below are always kilometres regardless of your settings.
 
 **Added Electric Range** shows the electric range a charge added, in kilometres as the car reports it, taken straight from the car rather than calculated. Support varies by model and there is nothing the integration can do about that: an MG IM5 reports it and keeps the figure between charges, while an MGS6 and an MG HS PHEV report `0` throughout a charge with everything else reporting healthily.
