@@ -265,5 +265,59 @@ class ERACFallbackTests(unittest.TestCase):
         self.assertIsNone(entity.extra_state_attributes)
 
 
+class BatteryEnergyTests(unittest.TestCase):
+    """Battery Energy: current energy in the pack, kWh.
+
+    Prefers the car's own figures over our arithmetic, but must not go blank
+    on cars that don't report them -- the MG HS PHEV returns
+    lastChargeEndingPower as None, which is exactly the case the SOC fallback
+    exists for.
+    """
+
+    def _sensor(self, *, pack_energy, soc, capacity):
+        vin_info = SimpleNamespace(vin="VIN1", brandName="MG", modelName="Test")
+        coordinator = SimpleNamespace(
+            vin_info=vin_info,
+            data={"charging": object(), "status": object()},
+            last_update_success=True,
+            effective_battery_capacity_kwh=capacity,
+        )
+        coordinator._extract_pack_energy_kwh = lambda cd: pack_energy
+        coordinator._extract_soc_pct = lambda bs, cd: soc
+        entry = SimpleNamespace(entry_id="e1")
+        return SENSOR.SAICMGBatteryEnergySensor(coordinator, entry)
+
+    def test_prefers_the_cars_own_figure(self):
+        s = self._sensor(pack_energy=41.235, soc=80.0, capacity=64.0)
+        self.assertEqual(s.native_value, 41.235)
+        self.assertEqual(s.extra_state_attributes["source"], "reported")
+
+    def test_falls_back_to_soc_times_capacity(self):
+        """The HS PHEV case: no lastChargeEndingPower, so nothing to report."""
+        s = self._sensor(pack_energy=None, soc=50.0, capacity=23.2)
+        self.assertAlmostEqual(s.native_value, 11.6, places=3)
+        self.assertEqual(s.extra_state_attributes["source"], "estimated")
+
+    def test_unknown_when_neither_source_is_available(self):
+        s = self._sensor(pack_energy=None, soc=None, capacity=64.0)
+        self.assertIsNone(s.native_value)
+        self.assertIsNone(s.extra_state_attributes)
+        self.assertFalse(s.available)
+
+    def test_unknown_without_a_capacity_to_estimate_from(self):
+        """An unprofiled car with no override: blank beats a wrong number."""
+        s = self._sensor(pack_energy=None, soc=80.0, capacity=None)
+        self.assertIsNone(s.native_value)
+
+    def test_reports_zero_rather_than_treating_it_as_missing(self):
+        s = self._sensor(pack_energy=0.0, soc=0.0, capacity=64.0)
+        self.assertEqual(s.native_value, 0.0)
+        self.assertEqual(s.extra_state_attributes["source"], "reported")
+
+    def test_exposes_the_capacity_it_would_estimate_from(self):
+        s = self._sensor(pack_energy=None, soc=80.0, capacity=64.0)
+        self.assertEqual(s.extra_state_attributes["usable_capacity_kWh"], 64.0)
+
+
 if __name__ == "__main__":
     unittest.main()

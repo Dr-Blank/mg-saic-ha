@@ -709,6 +709,8 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 # across the session, since the API only reports energy taken
                 # back out afterwards.
                 sensors.append(SAICMGLastChargeEnergySensor(coordinator, entry))
+                # How much energy is in the battery right now (kWh).
+                sensors.append(SAICMGBatteryEnergySensor(coordinator, entry))
                 sensors.append(SAICMGLastChargeRangeSensor(coordinator, entry))
             # SOC/odometer-based alternative — independent of the
             # since-charge counter fields, so available on every BEV/PHEV
@@ -3435,6 +3437,79 @@ class SAICMGEfficiencySinceChargeSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return self._compute()
+
+
+class SAICMGBatteryEnergySensor(CoordinatorEntity, SensorEntity):
+    """Energy currently held in the battery, in kWh.
+
+    Two sources, in order:
+
+    1. The car's own figures. India reports pack energy outright; elsewhere it
+       is reconstructed as ``lastChargeEndingPower - powerUsageSinceLastCharge``
+       -- what the pack held when the last charge ended, minus what has been
+       taken out since. Both are real API fields, so this is the car's own
+       accounting rather than our arithmetic.
+    2. Failing that, SOC% x usable capacity. Needed because some cars never
+       populate lastChargeEndingPower at all (the MG HS PHEV reports it as
+       None), which would otherwise leave this permanently blank on exactly
+       the cars that already have the least charging telemetry.
+
+    The ``source`` attribute says which was used: ``reported`` or
+    ``estimated``. They will not always agree -- the reported route inherits
+    whatever drift is in the car's own counters, while the estimated route
+    inherits the usable-capacity figure and the coarseness of SOC -- so the
+    attribute matters if the number ever looks off.
+    """
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        vin_info = coordinator.vin_info
+        self._attr_name = f"{vin_info.brandName} {vin_info.modelName} Battery Energy"
+        self._attr_unique_id = f"{entry.entry_id}_{vin_info.vin}_battery_energy"
+        self._attr_device_class = SensorDeviceClass.ENERGY_STORAGE
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+        self._attr_state_class = "measurement"
+        self._attr_icon = "mdi:battery-charging-medium"
+        self._attr_suggested_display_precision = 2
+        self._device_info = create_device_info(coordinator, entry.entry_id)
+        self._source = None
+
+    @property
+    def device_info(self):
+        return self._device_info
+
+    @property
+    def available(self):
+        return self.coordinator.last_update_success and self.native_value is not None
+
+    @property
+    def native_value(self):
+        charging_data = (self.coordinator.data or {}).get("charging")
+        reported = self.coordinator._extract_pack_energy_kwh(charging_data)
+        if reported is not None and reported >= 0:
+            self._source = "reported"
+            return round(reported, 3)
+
+        # Fallback: SOC x usable capacity.
+        soc = self.coordinator._extract_soc_pct(
+            (self.coordinator.data or {}).get("status"), charging_data
+        )
+        capacity = self.coordinator.effective_battery_capacity_kwh
+        if soc is None or not capacity:
+            self._source = None
+            return None
+        self._source = "estimated"
+        return round(soc / 100.0 * capacity, 3)
+
+    @property
+    def extra_state_attributes(self):
+        if self.native_value is None or self._source is None:
+            return None
+        attrs = {"source": self._source}
+        capacity = self.coordinator.effective_battery_capacity_kwh
+        if capacity:
+            attrs["usable_capacity_kWh"] = capacity
+        return attrs
 
 
 class SAICMGLastChargeEnergySensor(CoordinatorEntity, SensorEntity):
