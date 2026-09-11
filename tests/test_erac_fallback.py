@@ -288,12 +288,30 @@ class BatteryEnergyTests(unittest.TestCase):
         entry = SimpleNamespace(entry_id="e1")
         return SENSOR.SAICMGBatteryEnergySensor(coordinator, entry)
 
-    def test_prefers_the_cars_own_figure(self):
+    def test_prefers_the_trusted_capacity_over_the_cars_own_figure(self):
+        """#371: the car's reported energy is SOC x a nominal capacity it
+        holds internally, so preferring it silently defeated the capacity
+        override. The resolved capacity wins whenever we have one."""
         s = self._sensor(pack_energy=41.235, soc=80.0, capacity=64.0)
-        self.assertEqual(s.native_value, 41.235)
+        self.assertAlmostEqual(s.native_value, 51.2, places=3)
+        self.assertEqual(s.extra_state_attributes["source"], "estimated")
+
+    def test_steves_mg4_uses_his_override_not_the_api_capacity(self):
+        """His real numbers: SOC 72.7%, the car reporting 52.70 kWh (= 72.5,
+        the API placeholder), against a 61.7 kWh override. The override must
+        govern."""
+        s = self._sensor(pack_energy=52.70, soc=72.7, capacity=61.7)
+        self.assertAlmostEqual(s.native_value, 44.85, places=1)
+        self.assertEqual(s.extra_state_attributes["source"], "estimated")
+        self.assertNotAlmostEqual(s.native_value, 52.70, places=1)
+
+    def test_reported_used_when_there_is_no_capacity_to_calculate_from(self):
+        """India: real BMS pack energy, and no capacity field at all."""
+        s = self._sensor(pack_energy=37.4, soc=80.0, capacity=None)
+        self.assertEqual(s.native_value, 37.4)
         self.assertEqual(s.extra_state_attributes["source"], "reported")
 
-    def test_falls_back_to_soc_times_capacity(self):
+    def test_works_with_no_reported_figure_at_all(self):
         """The HS PHEV case: no lastChargeEndingPower, so nothing to report."""
         s = self._sensor(pack_energy=None, soc=50.0, capacity=23.2)
         self.assertAlmostEqual(s.native_value, 11.6, places=3)
@@ -305,13 +323,21 @@ class BatteryEnergyTests(unittest.TestCase):
         self.assertIsNone(s.extra_state_attributes)
         self.assertFalse(s.available)
 
-    def test_unknown_without_a_capacity_to_estimate_from(self):
-        """An unprofiled car with no override: blank beats a wrong number."""
+    def test_unknown_with_neither_a_capacity_nor_a_reported_figure(self):
+        """An unprofiled car with no override and nothing reported: blank
+        beats a wrong number."""
         s = self._sensor(pack_energy=None, soc=80.0, capacity=None)
         self.assertIsNone(s.native_value)
 
     def test_reports_zero_rather_than_treating_it_as_missing(self):
+        # Flat pack, capacity known: calculated route gives a genuine 0.0.
         s = self._sensor(pack_energy=0.0, soc=0.0, capacity=64.0)
+        self.assertEqual(s.native_value, 0.0)
+        self.assertEqual(s.extra_state_attributes["source"], "estimated")
+
+        # Flat pack, no capacity: the reported 0.0 must not be mistaken for
+        # missing data and blank the sensor.
+        s = self._sensor(pack_energy=0.0, soc=None, capacity=None)
         self.assertEqual(s.native_value, 0.0)
         self.assertEqual(s.extra_state_attributes["source"], "reported")
 
