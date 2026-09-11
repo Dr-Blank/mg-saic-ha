@@ -453,7 +453,8 @@
           "event_type": {
             "state": {
               "command_error": "Comando falhou",
-              "command_limit_reached": "Limite de comandos atingido"
+              "command_limit_reached": "Limite de comandos atingido",
+              "vehicle_not_locked": "Veículo não trancado"
             }
           }
         }

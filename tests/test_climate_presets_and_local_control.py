@@ -117,7 +117,14 @@ def _load_climate():
     class _CommandsLimitReachedException(Exception):
         pass
 
-    _module(f"{PACKAGE}.api", CommandsLimitReachedException=_CommandsLimitReachedException)
+    class _VehicleNotLockedException(Exception):
+        pass
+
+    _module(
+        f"{PACKAGE}.api",
+        CommandsLimitReachedException=_CommandsLimitReachedException,
+        VehicleNotLockedException=_VehicleNotLockedException,
+    )
     _module(
         f"{PACKAGE}.const",
         DOMAIN="mg_saic",
@@ -187,6 +194,7 @@ class _Base(unittest.TestCase):
         coordinator.notify_front_defrost_blocked = AsyncMock()
         coordinator.is_climate_blocking_defrost = MagicMock(return_value=False)
         coordinator.notify_command_limit_reached = AsyncMock()
+        coordinator.notify_vehicle_not_locked = AsyncMock()
         coordinator.record_command_error = MagicMock()
         coordinator.schedule_action_refresh = MagicMock()
         coordinator.get_ac_temperature_idx = MagicMock(side_effect=lambda temp: int(temp) - 13)

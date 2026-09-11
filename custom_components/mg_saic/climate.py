@@ -16,7 +16,7 @@ from homeassistant.const import (
     ATTR_TEMPERATURE,
 )
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .api import CommandsLimitReachedException
+from .api import CommandsLimitReachedException, VehicleNotLockedException
 from .const import (
     CLIMATE_STATUS_LOCAL_CONTROL,
     DOMAIN,
@@ -497,6 +497,8 @@ class SAICMGClimateEntity(CoordinatorEntity, ClimateEntity):
 
         except CommandsLimitReachedException:
             await self.coordinator.notify_command_limit_reached(self._vin)
+        except VehicleNotLockedException:
+            await self.coordinator.notify_vehicle_not_locked(self._vin)
         except Exception as e:
             LOGGER.error("Error setting HVAC mode for VIN %s: %s", self._vin, e)
             self.coordinator.record_command_error("Error setting HVAC mode", e)
@@ -665,6 +667,8 @@ class SAICMGClimateEntity(CoordinatorEntity, ClimateEntity):
 
         except CommandsLimitReachedException:
             await self.coordinator.notify_command_limit_reached(self._vin)
+        except VehicleNotLockedException:
+            await self.coordinator.notify_vehicle_not_locked(self._vin)
         except Exception as e:
             LOGGER.error("Error setting preset mode for VIN %s: %s", self._vin, e)
             self.coordinator.record_command_error("Error setting preset mode", e)

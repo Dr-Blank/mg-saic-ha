@@ -14,7 +14,7 @@ from saic_ismart_client_ng.api.vehicle_charging import (
     ScheduledChargingMode,
     ChargeCurrentLimitCode as ExternalChargeCurrentLimitCode,
 )
-from .api import CommandsLimitReachedException
+from .api import CommandsLimitReachedException, VehicleNotLockedException
 from .backends import Feature
 from .utils import create_device_info
 
@@ -338,6 +338,8 @@ class SAICMGScheduledChargingModeSelect(CoordinatorEntity, SelectEntity):
             )
         except CommandsLimitReachedException:
             await self.coordinator.notify_command_limit_reached(self._vin)
+        except VehicleNotLockedException:
+            await self.coordinator.notify_vehicle_not_locked(self._vin)
         except Exception as e:
             LOGGER.error(
                 "Error setting scheduled charging mode to %s for VIN %s: %s",
