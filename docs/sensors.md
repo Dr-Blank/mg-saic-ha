@@ -388,7 +388,9 @@ Where a car reports a capacity that can't be trusted, none is used: the `totalBa
 
 **Battery Energy** is calculated as battery percentage × the usable capacity resolved above, so a [battery capacity override](#battery-capacity-override) governs it directly. The `source` attribute reads `estimated` in that case.
 
-It only falls back to the car's own reported pack-energy figure — `source: reported` — where no capacity is available at all: an unprofiled model with no override, or an India-region car, whose charging frames carry real BMS pack energy in kWh but no capacity field to calculate from.
+It only falls back to the car's own reported pack-energy figure — `source: reported` — where no capacity is available at all, such as an unprofiled model with no override.
+
+India cars carry real BMS pack energy in kWh and no capacity field, so they were that case until the `derived` tier above. Now a capacity is derived from those same two figures, and this sensor reads `estimated` on them above 25% SOC — which changes the label, not the number: the derivation inverts the multiplication, so battery percentage × the derived capacity gives back the pack energy the car reported, to within the 0.1 kWh the derived figure is rounded to. Below 25% SOC nothing is derived and the sensor reads `reported` again, the same number by a shorter route.
 
 That order is deliberate, and it changed in **1.2.9-beta9**. The sensor originally preferred the car's reported figure, on the reasonable-sounding basis that the car knows its own pack. In practice it doesn't: on the models where it matters, that figure behaves as battery percentage × a nominal pack size held internally by the car, not as an independent BMS measurement. An MG4 Trophy LR reporting 52.70 kWh at 72.7% implies 72.5 kWh — the API's known-wrong placeholder — rather than the owner's 61.7 kWh override. So the reported figure added nothing the percentage didn't already give, while quietly inheriting the very capacity the override exists to correct.
 
